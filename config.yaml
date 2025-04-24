@@ -1,0 +1,23 @@
+# config.yaml - ChunKanon anonymization config
+
+k: 500
+doubling_step: 2
+
+quasi_identifiers:
+  numerical:
+    - Age
+    - BMI
+    - encoded_PIN
+  categorical:
+    - Blood Group
+    - Profession
+
+chunk_directory: datachunks
+output_path: generalized_chunk1.csv
+log_file: log.txt
+save_output: true
+
+hardcoded_min_max:
+  Age: [19, 85]
+  BMI: [12.7, 35.8]
+  encoded_PIN: [0, 1347]

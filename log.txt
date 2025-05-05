@@ -1,13 +1,11 @@
-[2025-04-21 11:23:51] Initial bin widths (Ri): [0, 0, 3125, 0, 0]
-[2025-04-21 11:24:13] Initial bin widths (Ri): [0, 0, 3125, 0, 0]
-[2025-04-21 11:34:03] Initial bin widths (Ri): [0, 0, 3125, 0, 0]
-[2025-04-24 11:16:41] Initial bin widths (Ri): [0, 0, 3125, 0, 0]
-[2025-04-24 11:22:08] Initial bin widths (Ri): [0, 0, 3125, 0, 0]
-[2025-04-24 11:23:04] Initial bin widths (Ri): [0, 0, 3125, 0, 0]
-[2025-04-24 11:36:24] Final bin widths (RF): [4, 23.099999999999998, 9999, 2, 0]
-[2025-04-24 11:36:30] Chunks: 1, k: 500
-[2025-04-24 11:36:30] Total time taken: 0h 13m 41s
-[2025-04-24 11:40:49] Initial bin widths (Ri): [0, 1, 25, 0, 0]
-[2025-04-24 12:10:38] Final bin widths (RF): [4, 23.099999999999998, 25, 2, 3]
-[2025-04-24 12:10:44] Chunks: 1, k: 500
-[2025-04-24 12:10:44] Total time taken: 0h 30m 8s
+[2025-04-28 19:00:04] Final bin widths (RF): [67, 176, 2]
+[2025-04-28 19:00:06] Chunks: 1, k: 500
+[2025-04-28 19:00:06] Total time taken: 0h 3m 30s
+[2025-04-28 19:03:33] Initial bin widths (Ri): [1, 1, 2]
+[2025-04-28 19:06:56] Final bin widths (RF): [4, 176, 2]
+[2025-04-28 19:07:00] Chunks: 1, k: 10
+[2025-04-28 19:07:00] Total time taken: 0h 3m 42s
+[2025-04-28 19:09:58] Initial bin widths (Ri): [1, 1, 2]
+[2025-04-28 19:13:15] Final bin widths (RF): [4, 176, 2]
+[2025-04-28 19:13:19] Chunks: 1, k: 10
+[2025-04-28 19:13:19] Total time taken: 0h 3m 33s

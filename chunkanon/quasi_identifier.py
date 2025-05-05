@@ -4,13 +4,13 @@ class QuasiIdentifier:
     Handles both categorical and numerical attributes.
     """
 
-    # Defines max generalization level for categorical QIs
+
     CATEGORICAL_RANGES = {
-        "Blood Group": 2,  
-        "Profession": 3     
+        "Blood Group": 3,  
+        "Profession": 4     
     }
 
-    def __init__(self, column_name: str, is_categorical: bool = False, min_value=None, max_value=None):
+    def __init__(self, column_name: str, is_categorical: bool = False, is_encoded :bool = False,min_value=None, max_value=None):
         """
         Initializes a QuasiIdentifier object.
 
@@ -22,10 +22,11 @@ class QuasiIdentifier:
         """
         self.column_name = column_name
         self.is_categorical = is_categorical
+        self.is_encoded = is_encoded
 
         if self.is_categorical and column_name in self.CATEGORICAL_RANGES:
-            self.min_value = 0
-            self.max_value = self.CATEGORICAL_RANGES[column_name]
+            self.min_value = 1
+            self.max_value = self.CATEGORICAL_RANGES[column_name] + 1
         else:
             self.min_value = min_value
             self.max_value = max_value

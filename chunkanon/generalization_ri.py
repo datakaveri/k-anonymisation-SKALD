@@ -2,11 +2,11 @@ import math
 from chunkanon.categorical import CategoricalGeneralizer
 
 class OLA_1:
-    def __init__(self, quasi_identifiers, n, max_equivalence_classes, doubling_step=2):
+    def __init__(self, quasi_identifiers, n, max_equivalence_classes, multiplication_factors):
         self.quasi_identifiers = quasi_identifiers
         self.n = n
         self.max_equivalence_classes = max_equivalence_classes
-        self.doubling_step = doubling_step
+        self.multiplication_factors = multiplication_factors
         self.tree = []
         self.smallest_passing_ri = None
         self.node_status = {}
@@ -17,19 +17,16 @@ class OLA_1:
         for qi, bin_width in zip(self.quasi_identifiers, bin_widths):
             if qi.is_categorical:
                 if qi.column_name == 'Blood Group':
-                    num_classes *= [8, 4, 1][int(bin_width)]
+                    num_classes *= [8, 4, 1][int(bin_width)-1]
                 elif qi.column_name == 'Profession':
-                    num_classes *= [16, 4, 2, 1][int(bin_width)]
+                    num_classes *= [16, 4, 2, 1][int(bin_width)-1]
             else:
-                if qi.column_name == 'BMI':
-                    num_classes *= (qi.get_range() * 10 if bin_width == 0 else qi.get_range() / bin_width)
-                else:
-                    num_classes *= (qi.get_range() if bin_width == 0 else qi.get_range() / bin_width)
+                num_classes *= (qi.get_range() / bin_width)
 
         return math.ceil(num_classes)
 
     def build_tree(self):
-        base = [0] * len(self.quasi_identifiers)
+        base = [1] * len(self.quasi_identifiers)
         self.tree = [[base]]
         self.node_status = {tuple(base): None}
 
@@ -39,23 +36,22 @@ class OLA_1:
             for node in self.tree[level]:
                 for i in range(len(node)):
                     new_node = node.copy()
-
-                    if self.quasi_identifiers[i].is_categorical:
-                        max_level = 2 if self.quasi_identifiers[i].column_name == "Blood Group" else 3
+                    qi =self.quasi_identifiers[i]
+                    if qi.is_categorical:
+                        max_level = 3 if qi.column_name == "Blood Group" else 4
                         if new_node[i] < max_level:
                             new_node[i] += 1
                             if tuple(new_node) not in self.node_status:
                                 next_level.append(new_node)
                                 self.node_status[tuple(new_node)] = None
                     else:
-                        max_val = self.quasi_identifiers[i].get_range()
+                        max_val = qi.get_range()
                         if new_node[i] < max_val:
-                            if new_node[i] == 0:
-                                new_node[i] = 1
+                            if (qi.is_encoded) :
+                                factor = self.multiplication_factors[qi.column_name[:-8]]
                             else:
-                                factor = 10 if self.quasi_identifiers[i].column_name == "PIN Code" else \
-                                         5 if self.quasi_identifiers[i].column_name == "encoded_PIN" else self.doubling_step
-                                new_node[i] = min(new_node[i] * factor, max_val)
+                                factor = self.multiplication_factors[qi.column_name]
+                            new_node[i] = min(new_node[i] * factor, max_val)
                             if tuple(new_node) not in self.node_status:
                                 next_level.append(new_node)
                                 self.node_status[tuple(new_node)] = None
@@ -73,17 +69,14 @@ class OLA_1:
             qi = self.quasi_identifiers[i]
             if qi.is_categorical:
                 max_levels = 3 if qi.column_name == 'Blood Group' else 4
-                precision += (bin_width + 1) / max_levels
+                precision += bin_width / max_levels
             else:
-                if qi.column_name == 'PIN Code':
-                    base = 10
-                elif qi.column_name == 'encoded_PIN':
-                    base = 5
+                if (qi.is_encoded) :
+                    base = self.multiplication_factors[qi.column_name[:-8]]
                 else:
-                    base = self.doubling_step
-
+                    base = self.multiplication_factors[qi.column_name]
                 max_levels = math.ceil(math.log(qi.get_range(), base)) + 2
-                level = 1 if bin_width == 0 else math.ceil(math.log(bin_width, base)) + 2
+                level = math.ceil(math.log(bin_width, base)) + 2
                 precision += level / max_levels
 
         return precision

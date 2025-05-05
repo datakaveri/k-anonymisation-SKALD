@@ -1,23 +1,36 @@
-# config.yaml - ChunKanon anonymization config
+# config.yaml
 
-k: 500
-doubling_step: 2
-
-quasi_identifiers:
-  numerical:
-    - Age
-    - BMI
-    - encoded_PIN
-  categorical:
-    - Blood Group
-    - Profession
+number_of_chunks: 1
+k: 10
+max_number_of_eq_classes: 15000000
+suppression_limit: 0.001
 
 chunk_directory: datachunks
 output_path: generalized_chunk1.csv
 log_file: log.txt
 save_output: true
 
+quasi_identifiers:
+  numerical:
+    - column: Age
+      encode: true
+      type: int
+    - column: BMI
+      encode: true
+      type: float
+    - column: PIN Code
+      encode: true
+      type: int
+  categorical: 
+    - Blood Group
+    - Profession
+
+bin_width_multiplication_factor:
+  Age: 2
+  BMI: 2
+  PIN Code: 2
+
 hardcoded_min_max:
   Age: [19, 85]
   BMI: [12.7, 35.8]
-  encoded_PIN: [0, 1347]
+  PIN Code : [560001, 591346]

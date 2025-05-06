@@ -1,8 +1,3 @@
-Sure! Here's the full content ready to **copy-paste directly** into your `README.md` file:
-
----
-
-````markdown
 # ChunKanon
 
 **ChunKanon** is a scalable, chunk-wise **K-anonymization** tool based on the **Optimal Lattice Anonymization (OLA)** algorithm. It is designed to handle large datasets by processing them in manageable chunks, ensuring data privacy while maintaining utility.
@@ -154,8 +149,6 @@ MIT License. See the [LICENSE](LICENSE) file for details.
 
 * Based on the principles of the OLA (Optimal Lattice Anonymization) algorithm.
 * Uses `pandas`, `numpy`, `PyYAML`, and standard Python libraries.
-
-```
 
 
 

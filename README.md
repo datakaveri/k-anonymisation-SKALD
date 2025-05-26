@@ -1,6 +1,6 @@
-# ChunKanon
+# SKALD
 
-**ChunKanon** is a scalable, chunk-wise **K-anonymization** tool based on the **Optimal Lattice Anonymization (OLA)** algorithm. It is designed to handle large datasets by processing them in manageable chunks, ensuring data privacy while maintaining utility.
+**SKALD** is a scalable, chunk-wise **K-anonymization** tool based on the **Optimal Lattice Anonymization (OLA)** algorithm. It is designed to handle large datasets by processing them in manageable chunks, ensuring data privacy while maintaining utility.
 
 ---
 
@@ -8,7 +8,7 @@
 
 - ✅ Chunk-wise `k`-anonymization using the Optimal Lattice Anonymization (OLA) method  
 - 🔢 Supports **numerical** and **categorical** quasi-identifiers  
-- 📦 Efficient **PIN code encoding** for high-cardinality attributes  
+- 📦 Efficient **encoding** for sparse numerical attributes  
 - 🔁 **Decoding** of generalized encoded values for interpretability  
 - 📊 Global histogram merging for optimal bin width selection  
 - 🚫 Suppression mechanism to meet `k`-anonymity without distorting data excessively  
@@ -32,7 +32,7 @@ pip install -r requirements.txt
 
 ## 🚀 Usage
 
-Run ChunKanon via the command line:
+Run SKALD via the command line:
 
 ```bash
 chunkanon --k 500 --chunks 100 --chunk-dir datachunks
@@ -85,7 +85,7 @@ hardcoded_min_max:
 
 1. Prepare your chunked dataset (e.g., `datachunks/KanonMedicalData_chunk1.csv`, ..., `chunk100.csv`)
 2. Define your QI attributes in `config.yaml`
-3. Run ChunKanon:
+3. Run SKALD:
 
 ```bash
 chunkanon --config config.yaml
@@ -129,6 +129,7 @@ k-anonymisation-SKALD/
 3. **OLA Phase 2**: Refines bin widths using global histograms from all chunks.
 4. **Generalization**: Applies finalized bin widths to generalize the first chunk.
 
+
 ---
 
 ## 📜 License
@@ -139,7 +140,8 @@ MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## 👨‍💻 Authors
 
-* **Kailash B G** — Core Developer
+* **Kailash** — Core Developer
+
 
 ---
 
@@ -147,4 +149,6 @@ MIT License. See the [LICENSE](LICENSE) file for details.
 
 * Based on the principles of the OLA (Optimal Lattice Anonymization) algorithm.
 * Uses `pandas`, `numpy`, `PyYAML`, and standard Python libraries.
+
+
 

@@ -21,7 +21,7 @@
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/your-username/k-anonymisation-SKALD.git
+git clone https://github.com/datakaveri/k-anonymisation-SKALD.git
 cd k-anonymisation-SKALD
 pip install -r requirements.txt
 pip install -e .

@@ -8,7 +8,7 @@
 
 - ✅ Chunk-wise `k`-anonymization using the Optimal Lattice Anonymization (OLA) method  
 - 🔢 Supports **numerical** and **categorical** quasi-identifiers  
-- 📦 Efficient **PIN code encoding** for high-cardinality attributes  
+- 📦 Efficient **encoding** for sparse numerical attributes  
 - 🔁 **Decoding** of generalized encoded values for interpretability  
 - 📊 Global histogram merging for optimal bin width selection  
 - 🚫 Suppression mechanism to meet `k`-anonymity without distorting data excessively  
@@ -128,7 +128,7 @@ k-anonymisation-SKALD/
 2. **OLA Phase 1**: Builds a lattice of bin widths to meet equivalence class constraints.
 3. **OLA Phase 2**: Refines bin widths using global histograms from all chunks.
 4. **Generalization**: Applies finalized bin widths to generalize the first chunk.
-5. **Suppression**: Records that can't be anonymized without violating `k` are suppressed.
+
 
 ---
 

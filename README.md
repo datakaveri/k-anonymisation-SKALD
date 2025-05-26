@@ -36,17 +36,14 @@ pip install -e .
 Run SKALD via the command line:
 
 ```bash
-chunkanon --k 500 --chunks 100 --chunk-dir datachunks
+chunkanon --config config.yaml
 ```
 
 ### CLI Arguments
 
 | Argument      | Description                                |
 | ------------- | ------------------------------------------ |
-| `--k`         | Desired k-anonymity level (e.g., 500)      |
-| `--chunks`    | Number of chunks to process (e.g., 100)    |
-| `--chunk-dir` | Directory containing the dataset chunks    |
-| `--config`    | (Optional) Path to custom YAML config file |
+| `--config`    | Path to custom YAML config file |
 
 ---
 

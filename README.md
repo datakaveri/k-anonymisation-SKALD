@@ -142,15 +142,10 @@ k-anonymisation-SKALD/
 
 ---
 
-## 📜 License
-
-MIT License. See the [LICENSE](LICENSE) file for details.
-
----
 
 ## 👨‍💻 Authors
 
-* **Kailash** — Core Developer
+* **Kailash R** — Core Developer
 
 
 ---

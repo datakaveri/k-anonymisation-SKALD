@@ -24,6 +24,7 @@
 git clone https://github.com/your-username/k-anonymisation-SKALD.git
 cd k-anonymisation-SKALD
 pip install -r requirements.txt
+pip install -e .
 ````
 
 > Python 3.8+ is required. Dependencies are listed in `requirements.txt`.
@@ -110,12 +111,12 @@ k-anonymisation-SKALD/
 │   ├── generalization_rf.py
 │   ├── quasi_identifier.py
 │   ├── utils.py
+│   ├── cli.py
 │   └── ...
 ├── encodings/
 ├── datachunks/
 ├── generalized_chunk.csv
 ├── config.yaml
-├── cli.py
 ├── README.md
 └── requirements.txt
 ```

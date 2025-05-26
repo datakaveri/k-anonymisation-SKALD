@@ -7,14 +7,15 @@ setup(
     install_requires=[
         'pandas',
         'numpy',
-        'tqdm'
+        'tqdm',
+        'pydantic'
     ],
     entry_points={
         'console_scripts': [
-            'chunkanon=cli:main'
+            'chunkanon=chunkanon.cli:main'
         ]
     },
-    author='CDPG',
+    author='Kailash R',
     description='Chunking-based K-Anonymization using Optimal Lattice Approach',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown'

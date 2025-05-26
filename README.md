@@ -50,31 +50,40 @@ chunkanon --config config.yaml
 ## ⚙️ Configuration (`config.yaml`)
 
 ```yaml
-k: 500
-number_of_chunks: 100
+number_of_chunks: 1
+k: 10
+max_number_of_eq_classes: 15000000
+suppression_limit: 0.001
+
 chunk_directory: datachunks
-output_path: generalized_chunk.csv
+output_path: generalized_chunk1.csv
 log_file: log.txt
 save_output: true
 
 quasi_identifiers:
   numerical:
     - column: Age
-      encode: false
+      encode: true
+      type: int
+    - column: BMI
+      encode: true
+      type: float
     - column: PIN Code
       encode: true
-  categorical:
-    - Blood Group
-    - Profession
+      type: int
+  categorical: 
+    - column : Blood Group
+    - column : Profession
 
-suppression_limit: 0.01
-max_number_of_eq_classes: 15000000
 bin_width_multiplication_factor:
-  Age: 1.5
+  Age: 2
+  BMI: 2
   PIN Code: 2
 
 hardcoded_min_max:
-  Age: [0, 100]
+  Age: [19, 85]
+  BMI: [12.7, 35.8]
+  PIN Code : [560001, 591346]
 ```
 
 ---

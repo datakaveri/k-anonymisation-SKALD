@@ -5,3 +5,4 @@ log.txt
 .coverage
 encoded_pins.txt
 chunkanon.egg-info
+venv

@@ -13,7 +13,7 @@ from chunkanon.utils import get_progress_iter, log_to_file, format_time, ensure_
 from chunkanon.config_validation import load_config
 
 
-def run_pipeline(config_path="config.yaml"):
+def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None):
     """
     Executes the chunk-based k-anonymization pipeline based on the provided configuration.
 
@@ -28,22 +28,34 @@ def run_pipeline(config_path="config.yaml"):
 
     Args:
         config_path (str): Path to the configuration YAML file.
+        k (int, optional): Override for k-anonymity value.
+        chunks (int, optional): Override for number of chunks.
+        chunk_dir (str, optional): Override for chunk directory.
 
     Returns:
         tuple: (final_rf, elapsed_time)
             - final_rf: Final bin widths per quasi-identifier.
             - elapsed_time: Total time taken for the pipeline.
     """
-
     # Load configuration object
     config = load_config(config_path)
 
-    # Extract key parameters from config
+    # Override config values if provided via CLI
+    if k is not None:
+        config.k = k
+    if chunks is not None:
+        config.number_of_chunks = chunks
+    if chunk_dir is not None:
+        config.chunk_directory = chunk_dir
+
+    # Use the updated values from config
     n = config.number_of_chunks
     k = config.k
+    chunk_dir = config.chunk_directory
+    output_path = config.output_path
+    suppression_limit = config.suppression_limit
     max_equivalence_classes = config.max_number_of_eq_classes
     suppression_limit = config.suppression_limit
-    chunk_dir = config.chunk_directory
     output_path = config.output_path
     log_file = config.log_file
     save_output = config.save_output

@@ -13,3 +13,5 @@
 [2025-05-06 14:57:35] Final bin widths (RF): [3, 3]
 [2025-05-06 14:57:35] Chunks: 1, k: 2
 [2025-05-06 14:57:35] Total time taken: 0h 0m 0s
+[2025-05-26 12:14:58] Initial bin widths (Ri): [1, 1, 128, 1, 1]
+[2025-05-26 12:16:43] Initial bin widths (Ri): [1, 1, 128, 1, 1]

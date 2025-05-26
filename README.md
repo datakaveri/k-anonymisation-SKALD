@@ -43,6 +43,9 @@ chunkanon --config config.yaml
 
 | Argument      | Description                                |
 | ------------- | ------------------------------------------ |
+| `--k`         | Desired k-anonymity level (e.g., 500)      |
+| `--chunks`    | Number of chunks to process (e.g., 100)    |
+| `--chunk_dir` | Directory containing the dataset chunks    |
 | `--config`    | Path to custom YAML config file |
 
 ---

@@ -4,13 +4,12 @@ class QuasiIdentifier:
     Handles both categorical and numerical attributes.
     """
 
-
     CATEGORICAL_RANGES = {
         "Blood Group": 3,  
         "Profession": 4     
     }
 
-    def __init__(self, column_name: str, is_categorical: bool = False, is_encoded :bool = False,min_value=None, max_value=None):
+    def __init__(self, column_name: str, is_categorical: bool = False, is_encoded: bool = False, min_value=None, max_value=None):
         """
         Initializes a QuasiIdentifier object.
 
@@ -25,11 +24,12 @@ class QuasiIdentifier:
         self.is_encoded = is_encoded
 
         if self.is_categorical and column_name in self.CATEGORICAL_RANGES:
-            self.min_value = 1
-            self.max_value = self.CATEGORICAL_RANGES[column_name] + 1
+            self.min_value = 1.0  # Default to float for categorical attributes
+            self.max_value = float(self.CATEGORICAL_RANGES[column_name] + 1)
         else:
-            self.min_value = min_value
-            self.max_value = max_value
+            # Ensure numerical attributes are converted to float
+            self.min_value = float(min_value) if min_value is not None else None
+            self.max_value = float(max_value) if max_value is not None else None
 
     def update_min_max(self, chunk):
         """
@@ -46,9 +46,9 @@ class QuasiIdentifier:
         chunk_max = column.max(skipna=True)
 
         if chunk_min is not None:
-            self.min_value = min(self.min_value, chunk_min) if self.min_value is not None else chunk_min
+            self.min_value = min(self.min_value, float(chunk_min)) if self.min_value is not None else float(chunk_min)
         if chunk_max is not None:
-            self.max_value = max(self.max_value, chunk_max) if self.max_value is not None else chunk_max
+            self.max_value = max(self.max_value, float(chunk_max)) if self.max_value is not None else float(chunk_max)
 
     def get_range(self):
         """
@@ -58,9 +58,9 @@ class QuasiIdentifier:
             int or float: The range (max - min) for numerical QIs, or fixed level count for categoricals.
         """
         if self.is_categorical:
-            return self.CATEGORICAL_RANGES.get(self.column_name, 0)
+            return float(self.CATEGORICAL_RANGES.get(self.column_name, 0))
 
         if self.min_value is None or self.max_value is None:
-            return 0  # Safeguard in case min/max are not defined
+            return 0.0  
 
-        return self.max_value - self.min_value
+        return float(self.max_value - self.min_value)

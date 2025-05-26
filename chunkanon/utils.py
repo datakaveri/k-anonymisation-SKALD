@@ -2,11 +2,8 @@ import os
 import json
 from datetime import datetime
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    tqdm = lambda x, **kwargs: x
-    print("[WARNING] tqdm not installed — progress bars will not be shown.")
+
+from tqdm import tqdm
 
 
 def log(message: str):

@@ -22,8 +22,8 @@ quasi_identifiers:
       encode: true
       type: int
   categorical: 
-    - Blood Group
-    - Profession
+    - column : Blood Group
+    - column : Profession
 
 bin_width_multiplication_factor:
   Age: 2

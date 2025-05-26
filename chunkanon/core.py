@@ -5,35 +5,65 @@ import pandas as pd
 import numpy as np
 import json
 
+# Import necessary components from chunkanon
 from chunkanon.quasi_identifier import QuasiIdentifier
-from chunkanon.generalization_ri import OLA_1
-from chunkanon.generalization_rf import OLA_2
+from chunkanon.generalization_ri import OLA_1  # Initial generalization tree builder
+from chunkanon.generalization_rf import OLA_2  # Final generalization and histogram merger
 from chunkanon.utils import get_progress_iter, log_to_file, format_time, ensure_folder
+from chunkanon.config_validation import load_config
+
 
 def run_pipeline(config_path="config.yaml"):
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"Config file not found at path: {config_path}")
+    """
+    Executes the chunk-based k-anonymization pipeline based on the provided configuration.
 
-    with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+    Pipeline Steps:
+    1. Load configuration and prepare environment.
+    2. Encode numerical quasi-identifiers (if required).
+    3. Define quasi-identifiers for tree-building.
+    4. Build RI tree and derive initial bin widths.
+    5. Build RF tree and calculate final bin widths.
+    6. Apply generalization to the first chunk and save.
+    7. Clean up temporary encoded columns from all chunks.
 
-    n = config.get("number_of_chunks", 1)
-    k = config.get("k", 500)
-    max_equivalence_classes = config.get("max_number_of_eq_classes", 15000000)
-    suppression_limit = config.get("suppression_limit", 0.01)
-    chunk_dir = config.get("chunk_directory", "datachunks")
-    output_path = config.get("output_path", "generalized_chunk.csv")
-    log_file = config.get("log_file", "log.txt")
-    save_output = config.get("save_output", True)
+    Args:
+        config_path (str): Path to the configuration YAML file.
 
-    categorical_columns = config.get("quasi_identifiers", {}).get("categorical", [])
-    numerical_columns_info = config.get("quasi_identifiers", {}).get("numerical", [])
-    hardcoded_min_max = config.get("hardcoded_min_max", {})
-    multiplication_factors = config.get("bin_width_multiplication_factor", {})
+    Returns:
+        tuple: (final_rf, elapsed_time)
+            - final_rf: Final bin widths per quasi-identifier.
+            - elapsed_time: Total time taken for the pipeline.
+    """
 
+    # Load configuration object
+    config = load_config(config_path)
+
+    # Extract key parameters from config
+    n = config.number_of_chunks
+    k = config.k
+    max_equivalence_classes = config.max_number_of_eq_classes
+    suppression_limit = config.suppression_limit
+    chunk_dir = config.chunk_directory
+    output_path = config.output_path
+    log_file = config.log_file
+    save_output = config.save_output
+
+    # Extract categorical and numerical QI info
+    categorical_columns = [col.column for col in config.quasi_identifiers.categorical]
+    numerical_columns_info = [
+        {"column": col.column, "encode": col.encode, "type": col.type}
+        for col in config.quasi_identifiers.numerical
+    ]
+
+    # Hardcoded min/max for numerical QIs and multiplication factors
+    hardcoded_min_max = config.hardcoded_min_max
+    multiplication_factors = config.bin_width_multiplication_factor
+
+    # Ensure chunk directory exists
     if not os.path.exists(chunk_dir):
         raise FileNotFoundError(f"Chunk directory not found: {chunk_dir}")
 
+    # Find all CSV files in chunk directory
     all_files = sorted([
         f for f in os.listdir(chunk_dir)
         if f.endswith(".csv")
@@ -42,6 +72,7 @@ def run_pipeline(config_path="config.yaml"):
     if not all_files:
         raise ValueError("No CSV files found in the chunk directory.")
 
+    # Take only the first `n` files
     chunk_files = all_files[:n]
 
     print(f"Processing {n} chunks from {chunk_dir}...")
@@ -52,64 +83,68 @@ def run_pipeline(config_path="config.yaml"):
 
     start_time = time.time()
 
-    # Helper to find decimal resolution
     def find_max_decimal_places(series):
+        """Helper function to find maximum number of decimal places in a float column."""
         decimals = series.dropna().map(lambda x: len(str(x).split(".")[1]) if "." in str(x) else 0)
         return decimals.max()
 
-    # Step 1: Encode necessary numerical columns
+    # ------------------------------
+    # Step 1: Encode numerical columns
+    # ------------------------------
     for info in numerical_columns_info:
         if info.get("encode", False):
             column = info.get("column")
-            column_type = info.get("type", "float")  # default type float
+            column_type = info.get("type", "float")  # Default type is float
 
             if not column:
                 raise ValueError("Missing 'column' key in numerical_columns_info.")
 
             all_unique_values = set()
-            multiplier = 1  # default multiplier
+            multiplier = 1  # Used to eliminate decimals for float values
 
-            encoded_column = f"{column}_encoded"  
+            encoded_column = f"{column}_encoded"
 
+            # Encode values in each chunk
             for filename in chunk_files:
-                try:
-                    chunk = pd.read_csv(os.path.join(chunk_dir, filename))
-                    values = chunk[column].dropna()
+                chunk = pd.read_csv(os.path.join(chunk_dir, filename))
+                values = chunk[column].dropna()
 
-                    if column_type == "float":
-                        decimal_places = find_max_decimal_places(values)
-                        multiplier = 10 ** decimal_places
-                        chunk[encoded_column] = (values * multiplier).round().astype(int)
-                        
-                    else:
-                        chunk[encoded_column] = chunk[column].astype(int)
+                if column_type == "float":
+                    # Determine precision to preserve decimals
+                    decimal_places = find_max_decimal_places(values)
+                    multiplier = 10 ** decimal_places
+                    chunk[encoded_column] = (values * multiplier).round().astype(int)
+                else:
+                    chunk[encoded_column] = chunk[column].astype(int)
 
-                    all_unique_values.update(chunk[encoded_column].unique())
-                    chunk.to_csv(os.path.join(chunk_dir, filename), index=False)  # save modified chunk immediately
-                    
-                    
-                except (FileNotFoundError, pd.errors.ParserError) as e:
-                    print(f"Error reading chunk {filename}: {e}")
-                    continue
+                all_unique_values.update(chunk[encoded_column].unique())
+                chunk.to_csv(os.path.join(chunk_dir, filename), index=False)
 
+
+            # Create encoding and decoding maps
             sorted_values = sorted(all_unique_values)
             encoding_map = {val: idx for idx, val in enumerate(sorted_values)}
             encoding_map = {int(k): v for k, v in encoding_map.items()}
             decoding_map = {idx: val for idx, val in enumerate(sorted_values)}
 
             encoding_maps[column] = {
-                "decoding_map": {int(k): int(v) if isinstance(v, (int, np.integer)) else float(v) if isinstance(v, (float, np.floating)) else v for k, v in decoding_map.items()},
+                "decoding_map": {
+                    int(k): int(v) if isinstance(v, (int, np.integer))
+                    else float(v) if isinstance(v, (float, np.floating)) else v
+                    for k, v in decoding_map.items()
+                },
                 "multiplier": int(multiplier) if isinstance(multiplier, (np.integer, np.int64)) else float(multiplier),
                 "type": column_type
             }
 
+            # Save encoding map to file
             try:
                 with open(os.path.join(encoding_dir, f"{column.replace(' ','_').lower()}_encoding.json"), "w") as f:
                     json.dump(encoding_maps[column], f, indent=4)
             except Exception as e:
                 print(f"Error saving encoding map for {column}: {e}")
 
-            # Encoding process on chunks
+            # Apply encoding map to each chunk
             for i in get_progress_iter(range(n), desc=f"Encoding {column}"):
                 chunk_path = os.path.join(chunk_dir, chunk_files[i])
                 try:
@@ -119,10 +154,13 @@ def run_pipeline(config_path="config.yaml"):
                 except Exception as e:
                     print(f"Error encoding column {column} in {chunk_path}: {e}")
 
-    # Step 2: Define quasi-identifiers (using the new encoded columns)
+    # ------------------------------
+    # Step 2: Define Quasi-Identifiers
+    # ------------------------------
     quasi_identifiers = []
     all_quasi_columns = []
-    
+
+    # Handle numerical QIs
     if numerical_columns_info:
         for info in numerical_columns_info:
             column = info.get("column")
@@ -130,30 +168,33 @@ def run_pipeline(config_path="config.yaml"):
                 continue
 
             encode = info.get("encode", False)
+            encoded_column = f"{column}_encoded" if encode else column
+
             if encode:
-                encoded_column = f"{column}_encoded"
+                # Use encoded range
                 min_val, max_val = 0, len(encoding_maps.get(column, {}).get("decoding_map", {}))
             else:
+                # Use hardcoded range
                 min_val, max_val = hardcoded_min_max.get(column, (None, None))
 
             if min_val is None or max_val is None:
                 print(f"Warning: Missing hardcoded min/max for numerical column '{column}'. Skipping.")
                 continue
 
-            all_quasi_columns.append(encoded_column if encode else column)
+            all_quasi_columns.append(encoded_column)
             quasi_identifiers.append(
                 QuasiIdentifier(
-                    encoded_column if encode else column, 
+                    encoded_column,
                     is_categorical=False,
-                    is_encoded=True if encode else False,  
+                    is_encoded=encode,
                     min_value=min_val,
                     max_value=max_val
                 )
             )
-
     else:
         print("Warning: No numerical quasi-identifiers found.")
 
+    # Handle categorical QIs
     if categorical_columns:
         for column in categorical_columns:
             if not column:
@@ -167,6 +208,9 @@ def run_pipeline(config_path="config.yaml"):
 
     print("Selected quasi-identifiers:", all_quasi_columns)
 
+    # ------------------------------
+    # Step 3: Build RI Tree
+    # ------------------------------
     total_records = 0
     if chunk_files:
         try:
@@ -175,15 +219,18 @@ def run_pipeline(config_path="config.yaml"):
             total_records = records_per_chunk * n
         except Exception as e:
             print(f"Error reading first chunk: {e}")
-    
+
     print("\nBuilding initial tree and finding Ri values...")
     ola_1 = OLA_1(quasi_identifiers, n, max_equivalence_classes, multiplication_factors)
     ola_1.build_tree()
-    initial_ri = ola_1.find_smallest_passing_ri(n)
+    initial_ri = ola_1.find_smallest_passing_ri(n)  # May be unused depending on implementation
     initial_ri = ola_1.get_optimal_ri()
     print("Initial bin widths (Ri):", initial_ri)
     log_to_file(f"Initial bin widths (Ri): {initial_ri}", log_file)
 
+    # ------------------------------
+    # Step 4: Build RF Tree and Histograms
+    # ------------------------------
     ola_2 = OLA_2(quasi_identifiers, total_records, suppression_limit, multiplication_factors)
     print("\nBuilding second tree with initial Ri values as root...")
     ola_2.build_tree(initial_ri)
@@ -207,6 +254,9 @@ def run_pipeline(config_path="config.yaml"):
     print("Final bin widths (RF):", final_rf)
     log_to_file(f"Final bin widths (RF): {final_rf}", log_file)
 
+    # ------------------------------
+    # Step 5: Apply Generalization and Save
+    # ------------------------------
     if save_output and chunk_files:
         print("\nGeneralizing first chunk based on RF...")
         first_chunk = pd.read_csv(os.path.join(chunk_dir, chunk_files[0]))
@@ -214,19 +264,25 @@ def run_pipeline(config_path="config.yaml"):
         generalized_chunk.to_csv(output_path, index=False)
         print(f"Generalized first chunk saved to: {output_path}")
 
-    
+    # ------------------------------
+    # Step 6: Clean up encoded columns
+    # ------------------------------
     for chunks in chunk_files:
         chunk_path = os.path.join(chunk_dir, chunks)
         chunk = pd.read_csv(chunk_path)
 
         for info in numerical_columns_info:
+            column = info.get("column")
             if info.get("encode", True):
+                encoded_column = f"{column}_encoded"
                 if encoded_column in chunk.columns:
                     chunk = chunk.drop(columns=[encoded_column], errors='ignore')
 
         chunk.to_csv(chunk_path, index=False)
 
-
+    # ------------------------------
+    # Step 7: Log total runtime
+    # ------------------------------
     elapsed_time = time.time() - start_time
     h, m, s = format_time(elapsed_time)
     print(f"\nTotal time taken: {h}h {m}m {s}s")

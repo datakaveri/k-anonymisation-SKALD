@@ -36,7 +36,7 @@ pip install -e .
 Run SKALD via the command line:
 
 ```bash
-chunkanon --config config.yaml --k 10 --chunks 5 --chunk_dir chunks
+chunkanon --config config.yaml [--k 10] [--chunks 5] [--chunk_dir chunks]
 ```
 
 ### CLI Arguments

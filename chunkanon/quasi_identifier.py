@@ -5,7 +5,8 @@ class QuasiIdentifier:
     """
 
     CATEGORICAL_RANGES = {
-        "Blood Group": 3,  
+        "Blood Group": 3,
+        "Gender" : 2,  
         "Profession": 4     
     }
 

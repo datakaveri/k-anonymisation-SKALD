@@ -1,7 +1,7 @@
 # config.yaml
 
-number_of_chunks: 100
-k: 10
+number_of_chunks: 5
+k: 2
 max_number_of_eq_classes: 62500
 suppression_limit: 0.01
 
@@ -15,18 +15,22 @@ quasi_identifiers:
     - column: Age
       encode: false
       type: int
+    - column: BMI
+      encode: true
+      type: float
     - column: PIN Code
       encode: true
       type: int
   categorical: 
     - column : Blood Group
-    - column : Gender
 
 
 bin_width_multiplication_factor:
   Age: 2
+  BMI: 2
   PIN Code: 2
 
 hardcoded_min_max:
   Age: [19, 85]
+  BMI: [15.2, 32.6]
   PIN Code : [560001, 591346]

@@ -6,3 +6,7 @@ log.txt
 encoded_pins.txt
 chunkanon.egg-info
 venv
+HealthDataGenerator.py
+Minmax_finder.py
+small_data/
+small_datachunks/

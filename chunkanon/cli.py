@@ -6,7 +6,7 @@ def main():
     parser.add_argument('--config', type=str, default='config.yaml', help='Path to YAML config file')
     parser.add_argument('--k', type=int, default=None, help='Override k from config')
     parser.add_argument('--chunks', type=int, default=None, help='Override number of chunks from config')
-    parser.add_argument('--chunk_dir', type=str, default='datachunks', help='Override chunk directory from config')
+    parser.add_argument('--chunk_dir', type=str, default='small_data', help='Override chunk directory from config')
     
     args = parser.parse_args()
 

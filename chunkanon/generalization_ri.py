@@ -45,6 +45,8 @@ class OLA_1:
                     num_classes *= [8, 4, 1][int(bin_width)-1]
                 elif qi.column_name == 'Profession':
                     num_classes *= [16, 4, 2, 1][int(bin_width)-1]
+                elif qi.column_name == 'Gender':
+                    num_classes *= [2, 1][int(bin_width)-1]
             else:
                 # For numeric QIs, use range/bin_width (unless bin_width is 0)
                 num_classes *= (float(qi.get_range()) if bin_width == 0 else float(qi.get_range()) / float(bin_width))
@@ -62,17 +64,23 @@ class OLA_1:
         self.tree = [[base]]
         self.node_status = {tuple(base): None}
 
-        level = 0
+        level = 1
         while True:
             next_level = []
-            for node in self.tree[level]:
+            for node in self.tree[level-1]:
                 for i in range(len(node)):
                     new_node = node.copy()
                     qi = self.quasi_identifiers[i]
 
                     if qi.is_categorical:
                         # Max hierarchy levels for categorical QIs
-                        max_level = 3 if qi.column_name == "Blood Group" else 4
+                        if qi.column_name == "Blood Group":
+                            max_level = 3
+                        elif qi.column_name == "Gender":
+                            max_level = 2
+                        else:
+                            max_level = 4
+
                         if new_node[i] < max_level:
                             new_node[i] += 1
                             if tuple(new_node) not in self.node_status:
@@ -112,7 +120,13 @@ class OLA_1:
             qi = self.quasi_identifiers[i]
 
             if qi.is_categorical:
-                max_levels = 3 if qi.column_name == 'Blood Group' else 4
+                if qi.column_name == "Blood Group":
+                    max_level = 3
+                elif qi.column_name == "Gender":
+                    max_level = 2
+                else:
+                    max_level = 4
+
                 precision += bin_width / max_levels
             else:
                 base = self.multiplication_factors[qi.column_name[:-8]] if qi.is_encoded else self.multiplication_factors[qi.column_name]

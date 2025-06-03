@@ -5,22 +5,30 @@ class CategoricalGeneralizer:
         """
         self.hierarchies = {
             "Blood Group": {
-                0: {  # Level 0: No generalization
+                1: {  # Level 0: No generalization
                     "A+": "A+", "A-": "A-", "B+": "B+", "B-": "B-",
                     "AB+": "AB+", "AB-": "AB-", "O+": "O+", "O-": "O-"
                 },
-                1: {  # Level 1: Group by blood type
+                2: {  # Level 1: Group by blood type
                     "A+": "A", "A-": "A", "B+": "B", "B-": "B",
                     "AB+": "AB", "AB-": "AB", "O+": "O", "O-": "O"
                 },
-                2: {  # Level 2: Fully generalized
+                3: {  # Level 2: Fully generalized
                     "A+": "*", "A-": "*", "B+": "*", "B-": "*",
                     "AB+": "*", "AB-": "*", "O+": "*", "O-": "*"
                 }
             },
+            "Gender": {
+                1: {  # Level 0: No generalization
+                    "Male": "Male", "Female" :"Female"
+                },
+                2: {  # Level 1: Fully generalized
+                    "Male": "*", "Female" :"*"
+                }
+            },
             "Profession": {
-                0: lambda x: x,  # Level 0: No generalization
-                1: {  # Level 1: Profession → Subcategory
+                1: lambda x: x,  # Level 0: No generalization
+                2: {  # Level 1: Profession → Subcategory
                     "Medical Specialists": "Healthcare",
                     "Allied Health": "Healthcare",
                     "Nursing": "Healthcare",
@@ -38,7 +46,7 @@ class CategoricalGeneralizer:
                     "Data & Analytics": "Engineering",
                     "AI & Machine Learning": "Engineering"
                 },
-                2: {  # Level 2: Subcategory → Broad Category
+                3: {  # Level 2: Subcategory → Broad Category
                     "Medical Specialists": "Service Sector",
                     "Allied Health": "Service Sector",
                     "Nursing": "Service Sector",
@@ -56,7 +64,7 @@ class CategoricalGeneralizer:
                     "Data & Analytics": "Non-Service",
                     "AI & Machine Learning": "Non-Service"
                 },
-                3: lambda x: "*"  # Level 3: Fully generalized
+                4: lambda x: "*"  # Level 3: Fully generalized
             }
         }
 
@@ -109,3 +117,16 @@ class CategoricalGeneralizer:
             str: The generalized profession value.
         """
         return self.generalize("Profession", value, level)
+    
+    def generalize_gender(self, value, level):
+        """
+        Wrapper for generalizing blood group values.
+
+        Args:
+            value (str): The blood group value.
+            level (int): The generalization level.
+
+        Returns:
+            str: The generalized blood group value.
+        """
+        return self.generalize("Gender", value, level)

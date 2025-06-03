@@ -4,36 +4,36 @@
 
 ---
 
-## ✨ Features
+## Features
 
-- ✅ Chunk-wise `k`-anonymization using the Optimal Lattice Anonymization (OLA) method  
-- 🔢 Supports **numerical** and **categorical** quasi-identifiers  
-- 📦 Efficient **encoding** for sparse numerical attributes  
-- 🔁 **Decoding** of generalized encoded values for interpretability  
-- 📊 Global histogram merging for optimal bin width selection  
-- 🚫 Suppression mechanism to meet `k`-anonymity without distorting data excessively  
-- 🧱 Clean architecture separating core logic, generalization, and utilities  
-- ⚙️ Fully configurable via a `YAML` file  
-- 📁 Logging support and reproducible output structure  
+- Chunk-wise `k`-anonymization using the Optimal Lattice Anonymization (OLA) method  
+- Supports numerical and categorical quasi-identifiers  
+- Efficient encoding for sparse numerical attributes  
+- Decoding of generalized encoded values for interpretability  
+- Global histogram merging for optimal bin width selection  
+- Suppression mechanism to meet `k`-anonymity without excessive data distortion  
+- Clean architecture separating core logic, generalization, and utilities  
+- Fully configurable via a YAML file  
+- Logging support and reproducible output structure  
 
 ---
 
-## 📦 Installation
+## Installation
 
 ```bash
 git clone https://github.com/datakaveri/k-anonymisation-SKALD.git
 cd k-anonymisation-SKALD
 pip install -r requirements.txt
 pip install -e .
-````
+```
 
-> Python 3.8+ is required. Dependencies are listed in `requirements.txt`.
+**Requirements:** Python 3.8+ and the dependencies listed in `requirements.txt`.
 
 ---
 
-## 🚀 Usage
+## Usage
 
-Run SKALD via the command line:
+Run SKALD from the command line:
 
 ```bash
 chunkanon --config config.yaml [--k 10] [--chunks 5] [--chunk_dir chunks]
@@ -41,16 +41,16 @@ chunkanon --config config.yaml [--k 10] [--chunks 5] [--chunk_dir chunks]
 
 ### CLI Arguments
 
-| Argument      | Description                                |
-| ------------- | ------------------------------------------ |
-| `--k`         | Desired k-anonymity level (e.g., 500)      |
-| `--chunks`    | Number of chunks to process (e.g., 100)    |
-| `--chunk_dir` | Directory containing the dataset chunks    |
-| `--config`    | Path to custom YAML config file |
+| Argument      | Description                                 |
+| ------------- | ------------------------------------------- |
+| `--k`         | Desired k-anonymity level (e.g., 500)       |
+| `--chunks`    | Number of chunks to process (e.g., 100)     |
+| `--chunk_dir` | Directory containing the dataset chunks     |
+| `--config`    | Path to custom YAML config file             |
 
 ---
 
-## ⚙️ Configuration (`config.yaml`)
+## Configuration File (`config.yaml`)
 
 ```yaml
 number_of_chunks: 1
@@ -75,8 +75,8 @@ quasi_identifiers:
       encode: true
       type: int
   categorical: 
-    - column : Blood Group
-    - column : Profession
+    - column: Blood Group
+    - column: Profession
 
 bin_width_multiplication_factor:
   Age: 2
@@ -86,31 +86,31 @@ bin_width_multiplication_factor:
 hardcoded_min_max:
   Age: [19, 85]
   BMI: [12.7, 35.8]
-  PIN Code : [560001, 591346]
+  PIN Code: [560001, 591346]
 ```
 
 ---
 
-## 🧪 Example Workflow
+## Example Workflow
 
 1. Prepare your chunked dataset (e.g., `datachunks/KanonMedicalData_chunk1.csv`, ..., `chunk100.csv`)
-2. Define your QI attributes in `config.yaml`
+2. Define your quasi-identifiers in `config.yaml`
 3. Run SKALD:
 
 ```bash
 chunkanon --config config.yaml
 ```
 
-### Output Includes
+### Output
 
-* `generalized_chunk.csv`: Anonymized first chunk
-* `encodings/`: Directory with JSON encoding maps
-* `log.txt`: Logs and bin width info
-* Console logs: Runtime and generalization details
+- `generalized_chunk.csv`: Anonymized first chunk  
+- `encodings/`: JSON encoding maps  
+- `log.txt`: Logging output, bin width info  
+- Console: Runtime and generalization details  
 
 ---
 
-## 📂 Folder Structure
+## Project Structure
 
 ```
 k-anonymisation-SKALD/
@@ -132,28 +132,22 @@ k-anonymisation-SKALD/
 
 ---
 
-## 🧠 How It Works
+## How It Works
 
-1. **Chunk Encoding**: High-cardinality QIs like PIN codes are encoded and stored in JSON format.
-2. **OLA Phase 1**: Builds a lattice of bin widths to meet equivalence class constraints.
-3. **OLA Phase 2**: Refines bin widths using global histograms from all chunks.
-4. **Generalization**: Applies finalized bin widths to generalize the first chunk.
-
-
----
-
-
-## 👨‍💻 Authors
-
-* **Kailash R** — Core Developer
-
+1. **Chunk Encoding**: Encodes high-cardinality numerical QIs and stores mappings as JSON.  
+2. **OLA Phase 1**: Constructs a lattice of bin widths to meet equivalence class constraints.  
+3. **OLA Phase 2**: Merges histograms from all chunks to refine bin widths.  
+4. **Generalization**: Applies the finalized bin widths to the target chunk for anonymization.  
 
 ---
 
-## 📣 Acknowledgements
+## Authors
 
-* Based on the principles of the OLA (Optimal Lattice Anonymization) algorithm.
-* Uses `pandas`, `numpy`, `PyYAML`, and standard Python libraries.
+- **Kailash R** — Core Developer
 
+---
 
+## Acknowledgements
 
+- Based on the Optimal Lattice Anonymization (OLA) algorithm.  
+- Utilizes open-source libraries such as `pandas`, `numpy`, and `PyYAML`.

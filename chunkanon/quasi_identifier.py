@@ -26,7 +26,7 @@ class QuasiIdentifier:
 
         if self.is_categorical and column_name in self.CATEGORICAL_RANGES:
             self.min_value = 1.0  # Default to float for categorical attributes
-            self.max_value = float(self.CATEGORICAL_RANGES[column_name] + 1)
+            self.max_value = float(self.CATEGORICAL_RANGES[column_name])
         else:
             # Ensure numerical attributes are converted to float
             self.min_value = float(min_value) if min_value is not None else None
@@ -64,4 +64,4 @@ class QuasiIdentifier:
         if self.min_value is None or self.max_value is None:
             return 0.0  
 
-        return float(self.max_value - self.min_value)
+        return float(self.max_value - self.min_value + 1)

@@ -166,6 +166,7 @@ class OLA_1:
                     continue
 
                 classes = self.calculate_equivalence_classes(node)
+                #print(f"No. of Equivalence classes for node : {node}, is {classes}" )
                 if classes <= self.max_equivalence_classes:
                     self._mark_subtree_pass(node)
                 else:

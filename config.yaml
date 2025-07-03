@@ -1,9 +1,9 @@
 # config.yaml
 
-number_of_chunks: 100
-k: 10
+number_of_chunks: 125
+k: 1000
 max_number_of_eq_classes: 62500
-suppression_limit: 0.01
+suppression_limit: 0.0005
 
 chunk_directory: small_data
 output_path: generalized_chunk1.csv
@@ -18,6 +18,9 @@ quasi_identifiers:
     - column: PIN Code
       encode: true
       type: int
+    - column: BMI
+      encode: true
+      type: float
   categorical: 
     - column : Blood Group
     - column : Gender
@@ -26,7 +29,9 @@ quasi_identifiers:
 bin_width_multiplication_factor:
   Age: 2
   PIN Code: 2
+  BMI: 2
 
 hardcoded_min_max:
   Age: [19, 85]
-  PIN Code : [560001, 591346]
+  PIN Code : [560001, 572010]
+  BMI : [14.4, 33.0]

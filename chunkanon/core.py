@@ -135,9 +135,9 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
 
             # Create encoding and decoding maps
             sorted_values = sorted(all_unique_values)
-            encoding_map = {val: idx for idx, val in enumerate(sorted_values)}
+            encoding_map = {val: idx+1 for idx, val in enumerate(sorted_values)}
             encoding_map = {int(k): v for k, v in encoding_map.items()}
-            decoding_map = {idx: val for idx, val in enumerate(sorted_values)}
+            decoding_map = {idx+1 : val for idx, val in enumerate(sorted_values)}
 
             encoding_maps[column] = {
                 "decoding_map": {
@@ -184,7 +184,7 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
 
             if encode:
                 # Use encoded range
-                min_val, max_val = 0, len(encoding_maps.get(column, {}).get("decoding_map", {}))
+                min_val, max_val = 1, len(encoding_maps.get(column, {}).get("decoding_map", {}))
             else:
                 # Use hardcoded range
                 min_val, max_val = hardcoded_min_max.get(column, (None, None))
@@ -263,7 +263,10 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
     print("\nMerging histograms and finding final bin widths...")
     global_histogram = ola_2.merge_histograms(histograms)
     final_rf = ola_2.get_final_binwidths(global_histogram, k)
+    supp_percent = ola_2.get_suppressed_percent(final_rf,global_histogram,k)
     print("Final bin widths (RF):", final_rf)
+    print("suppressed percentage of records :", supp_percent)
+
     log_to_file(f"Final bin widths (RF): {final_rf}", log_file)
 
     # ------------------------------

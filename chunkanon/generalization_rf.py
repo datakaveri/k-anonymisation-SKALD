@@ -27,6 +27,9 @@ class OLA_2:
         self.domains = []
 
     def build_tree(self, initial_ri):
+        #for i, qi in enumerate(self.quasi_identifiers):
+        #    print(f"QI {i}: {qi.column_name}, is_categorical: {qi.is_categorical}")
+
         self.tree = [[initial_ri]]
         if initial_ri is None:
             raise ValueError("initial_ri is None.")
@@ -137,11 +140,29 @@ class OLA_2:
 
     def merge_equivalence_classes(self, histogram, new_bin_widths):
         merged = histogram.copy()
-        for i, (qi, bw) in enumerate(zip(self.quasi_identifiers, new_bin_widths)):
+        #print(f"Merging node: {new_bin_widths} → shape before: {histogram.shape}")
+        for i, (qi, level) in enumerate(zip(self.quasi_identifiers, new_bin_widths)):
             if not qi.is_categorical:
-                group_size = max(1, int(bw))
+                group_size = max(1, int(level))  # level is bin width here
                 merged = self.merge_axis(merged, i, group_size)
+            else:
+                # For categorical: simulate grouping using number of levels
+                domain_size = len(self.domains[i])
+                max_level = self._get_max_categorical_level(qi)
+                if max_level == 0: continue  # prevent divide by 0
+                group_size = max(1, int(domain_size // (max_level - level + 1)))
+                merged = self.merge_axis(merged, i, group_size)
+
+
         return merged
+
+    def _get_max_categorical_level(self, qi):
+        if qi.column_name == "Blood Group":
+            return 3
+        elif qi.column_name == "Gender":
+            return 2
+        else:
+            return 4  # default
 
     def check_k_anonymity(self, histogram, k):
         self.suppression_count = 0
@@ -170,7 +191,9 @@ class OLA_2:
             )
 
             if sorted_nodes:
+                
                 node = sorted_nodes[len(sorted_nodes) // 2]
+
                 histogram = self.merge_equivalence_classes(histogram, node)
 
                 if self.node_status[tuple(node)] is not None:
@@ -227,14 +250,13 @@ class OLA_2:
         best_node = None
         lowest_dm_star = float('inf')
         print("\nPassing nodes and their DM* values:")
-
         for node in pass_nodes:
             merged_hist = self.merge_equivalence_classes(histogram.copy(), list(node))
             low_count_sum = np.sum(merged_hist[merged_hist < k])
             dm_star = np.sum(merged_hist[merged_hist >= k] ** 2) + low_count_sum ** 2
-
-            print(f"Node: {list(node)}, DM*: {dm_star}")
-            if dm_star < lowest_dm_star:
+            supp_percent = self.get_suppressed_percent(node,histogram,k)
+            print(f"Node: {list(node)}, DM*: {dm_star}, percent of records suppressed :{supp_percent}")
+            if dm_star <= lowest_dm_star:
                 lowest_dm_star = dm_star
                 best_node = node
 

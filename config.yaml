@@ -1,7 +1,9 @@
 # config.yaml
 
-number_of_chunks: 125
-k: 1000
+number_of_chunks: 25
+k: 50
+l: 6
+
 max_number_of_eq_classes: 62500
 suppression_limit: 0.0005
 
@@ -25,7 +27,7 @@ quasi_identifiers:
     - column : Blood Group
     - column : Gender
 
-
+sensitive_parameter : Health Condition
 bin_width_multiplication_factor:
   Age: 2
   PIN Code: 2
@@ -35,3 +37,5 @@ hardcoded_min_max:
   Age: [19, 85]
   PIN Code : [560001, 572010]
   BMI : [14.4, 33.0]
+
+

@@ -4,6 +4,8 @@ import os
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+
+from collections import defaultdict
 from chunkanon.categorical import CategoricalGeneralizer
 
 
@@ -14,8 +16,10 @@ class OLA_2:
     the best trade-off between data utility and privacy within a suppression threshold.
     """
 
-    def __init__(self, quasi_identifiers, total_records, suppression_limit, multiplication_factors):
+    def __init__(self, quasi_identifiers, total_records, suppression_limit, multiplication_factors,sensitive_parameter):
         self.quasi_identifiers = quasi_identifiers
+        self.sensitive_parameter = sensitive_parameter
+        self.sensitive_sets = None  
         self.total_records = total_records
         self.suppression_limit = suppression_limit
         self.multiplication_factors = multiplication_factors
@@ -109,6 +113,7 @@ class OLA_2:
         return tuple(indices)
 
 
+
     def process_chunk(self, chunk, bin_widths):
         if not self.domains:
             self.build_domains(chunk)
@@ -116,11 +121,22 @@ class OLA_2:
         shape = [len(dom) for dom in self.domains]
         histogram = np.zeros(shape, dtype=int)
 
+        # initialize nested sensitive sets
+        def nested_defaultdict():
+            return defaultdict(set)
+
+        self.sensitive_sets = np.empty(shape, dtype=object)
+        it = np.nditer(histogram, flags=['multi_index', 'refs_ok'], op_flags=['writeonly'])
+        for idx in it:
+            self.sensitive_sets[it.multi_index] = set()
+
         for _, row in chunk.iterrows():
             idx = self.get_index_tuple(row)
             histogram[idx] += 1
+            self.sensitive_sets[idx].add(row[self.sensitive_parameter])
 
         return histogram
+
 
     def merge_axis(self, array, axis, group_size):
         shape = list(array.shape)
@@ -137,24 +153,42 @@ class OLA_2:
         reshaped = np.reshape(array, shape[:axis] + (new_size, group_size) + shape[axis+1:])
 
         return np.sum(reshaped, axis=axis+1)
+    def merge_sets_axis(self, array, axis, group_size):
+        shape = array.shape
+        new_size = (shape[axis] + group_size - 1) // group_size
+        new_shape = list(shape)
+        new_shape[axis] = new_size
 
-    def merge_equivalence_classes(self, histogram, new_bin_widths):
-        merged = histogram.copy()
-        #print(f"Merging node: {new_bin_widths} → shape before: {histogram.shape}")
-        for i, (qi, level) in enumerate(zip(self.quasi_identifiers, new_bin_widths)):
-            if not qi.is_categorical:
-                group_size = max(1, int(level))  # level is bin width here
-                merged = self.merge_axis(merged, i, group_size)
-            else:
-                # For categorical: simulate grouping using number of levels
-                domain_size = len(self.domains[i])
-                max_level = self._get_max_categorical_level(qi)
-                if max_level == 0: continue  # prevent divide by 0
-                group_size = max(1, int(domain_size // (max_level - level + 1)))
-                merged = self.merge_axis(merged, i, group_size)
+        merged = np.empty(new_shape, dtype=object)
+        for i in np.ndindex(*new_shape):
+            merged[i] = set()
 
+        for idx in np.ndindex(*shape):
+            new_idx = list(idx)
+            new_idx[axis] = idx[axis] // group_size
+            merged[tuple(new_idx)] |= array[idx]
 
         return merged
+
+    def merge_equivalence_classes(self, histogram, sensitive_sets, new_bin_widths):
+        merged_hist = histogram.copy()
+        merged_sets = sensitive_sets.copy()
+
+        for i, (qi, level) in enumerate(zip(self.quasi_identifiers, new_bin_widths)):
+            if not qi.is_categorical:
+                group_size = max(1, int(level))
+            else:
+                domain_size = len(self.domains[i])
+                max_level = self._get_max_categorical_level(qi)
+                group_size = max(1, int(domain_size // (max_level - level + 1)))
+
+            merged_hist = self.merge_axis(merged_hist, i, group_size)
+            merged_sets = self.merge_sets_axis(merged_sets, i, group_size)
+
+        self.sensitive_sets = merged_sets
+        return merged_hist, merged_sets
+
+
 
     def _get_max_categorical_level(self, qi):
         if qi.column_name == "Blood Group":
@@ -164,18 +198,32 @@ class OLA_2:
         else:
             return 4  # default
 
-    def check_k_anonymity(self, histogram, k):
+    def check_k_anonymity(self, histogram, k, l):
         self.suppression_count = 0
         failing_mask = (histogram < k) & (histogram > 0)
         self.suppression_count = histogram[failing_mask].sum()
-        return not failing_mask.any()
+
+        if failing_mask.any():
+            return False
+
+        # l-diversity check
+        if self.sensitive_sets is None:
+            raise ValueError("Sensitive sets not initialized.")
+
+        diverse_mask = np.vectorize(lambda s: len(s) >= l)(self.sensitive_sets)
+        suppressed = (~diverse_mask) & (histogram > 0)
+
+        self.suppression_count += histogram[suppressed].sum()
+        return not suppressed.any()
+
 
     def merge_histograms(self, histograms):
         return np.sum(np.array(histograms), axis=0)
 
-    def get_final_binwidths(self, histogram, k):
+    def get_final_binwidths(self, histogram, k,l):
         pass_nodes = []
         histogram_const = histogram.copy()
+        sensitive_sets_const = self.sensitive_sets.copy()
         total_nodes = sum(len(level) for level in self.tree)
         pbar = tqdm(total=total_nodes, desc="Marking Nodes", unit="node")
 
@@ -194,12 +242,13 @@ class OLA_2:
                 
                 node = sorted_nodes[len(sorted_nodes) // 2]
 
-                histogram = self.merge_equivalence_classes(histogram, node)
+                histogram, self.sensitive_sets = self.merge_equivalence_classes(histogram, sensitive_sets_const, node)
+
 
                 if self.node_status[tuple(node)] is not None:
                     continue
 
-                if self.check_k_anonymity(histogram, k):
+                if self.check_k_anonymity(histogram, k,l):
                     self._mark_subtree_pass(node, pbar)
                     pass_nodes.append(node)
                 elif self.suppression_count < (self.suppression_limit * self.total_records):
@@ -209,7 +258,7 @@ class OLA_2:
                     self._mark_parents_fail(node, pbar)
 
         pbar.close()
-        self.find_best_rf(histogram_const, pass_nodes, k)
+        self.find_best_rf(histogram_const, pass_nodes, k,sensitive_sets_const)
         return self.smallest_passing_rf if self.smallest_passing_rf else list(self.tree[0][0])
 
     def _mark_subtree_pass(self, node, pbar=None):
@@ -246,12 +295,12 @@ class OLA_2:
                         q.append(parent)
                         if pbar: pbar.update(1)
 
-    def find_best_rf(self, histogram, pass_nodes, k):
+    def find_best_rf(self, histogram, pass_nodes, k,sensitive_sets):
         best_node = None
         lowest_dm_star = float('inf')
         print("\nPassing nodes and their DM* values:")
         for node in pass_nodes:
-            merged_hist = self.merge_equivalence_classes(histogram.copy(), list(node))
+            merged_hist,_ = self.merge_equivalence_classes(histogram.copy(),sensitive_sets, list(node))
             low_count_sum = np.sum(merged_hist[merged_hist < k])
             dm_star = np.sum(merged_hist[merged_hist >= k] ** 2) + low_count_sum ** 2
             supp_percent = self.get_suppressed_percent(node,histogram,k)
@@ -326,6 +375,6 @@ class OLA_2:
         return combined
 
     def get_suppressed_percent(self, node, histogram, k):
-        histogram = self.merge_equivalence_classes(histogram, list(node))
+        histogram,_ = self.merge_equivalence_classes(histogram, self.sensitive_sets,list(node))
         self.suppression_count = np.sum((histogram > 0) & (histogram < k))
         return (self.suppression_count / self.total_records) * 100

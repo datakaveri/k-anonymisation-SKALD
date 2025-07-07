@@ -98,6 +98,7 @@ class Config(BaseModel):
 
     number_of_chunks: int
     k: int
+    l: int
     max_number_of_eq_classes: int
     suppression_limit: condecimal(ge=0, le=1)
 
@@ -107,6 +108,7 @@ class Config(BaseModel):
     save_output: bool
 
     quasi_identifiers: QuasiIdentifiers
+    sensitive_parameter:str
     bin_width_multiplication_factor: Dict[str, int]
     hardcoded_min_max: Optional[Dict[str, List[condecimal(ge=0)]]] = {}
 

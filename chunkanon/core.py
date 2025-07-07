@@ -51,11 +51,13 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
     # Use the updated values from config
     n = config.number_of_chunks
     k = config.k
+    l = config.l
     chunk_dir = config.chunk_directory
     output_path = config.output_path
     suppression_limit = config.suppression_limit
     max_equivalence_classes = config.max_number_of_eq_classes
     suppression_limit = config.suppression_limit
+    sensitive_paramter = config.sensitive_parameter
     output_path = config.output_path
     log_file = config.log_file
     save_output = config.save_output
@@ -243,7 +245,7 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
     # ------------------------------
     # Step 4: Build RF Tree and Histograms
     # ------------------------------
-    ola_2 = OLA_2(quasi_identifiers, total_records, suppression_limit, multiplication_factors)
+    ola_2 = OLA_2(quasi_identifiers, total_records, suppression_limit, multiplication_factors,sensitive_paramter)
     print("\nBuilding second tree with initial Ri values as root...")
     ola_2.build_tree(initial_ri)
 
@@ -262,7 +264,7 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
 
     print("\nMerging histograms and finding final bin widths...")
     global_histogram = ola_2.merge_histograms(histograms)
-    final_rf = ola_2.get_final_binwidths(global_histogram, k)
+    final_rf = ola_2.get_final_binwidths(global_histogram, k,l)
     supp_percent = ola_2.get_suppressed_percent(final_rf,global_histogram,k)
     print("Final bin widths (RF):", final_rf)
     print("suppressed percentage of records :", supp_percent)

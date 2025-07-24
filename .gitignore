@@ -13,3 +13,5 @@ small_datachunks/
 chunkanon/__pycache__/
 chunkanon/schema.json
 DM*.py
+small_data.zip
+venv/

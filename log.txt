@@ -429,3 +429,5 @@
 [2025-07-07 11:12:39] Chunks: 1, k: 10
 [2025-07-07 11:12:39] Total time taken: 0h 0m 3s
 [2025-07-07 14:36:44] Initial bin widths (Ri): [1, 1, 32, 3, 2]
+[2025-07-24 15:08:51] Initial bin widths (Ri): [1, 1, 32, 3, 2]
+[2025-07-24 15:09:32] Initial bin widths (Ri): [1, 1, 16, 3, 2]

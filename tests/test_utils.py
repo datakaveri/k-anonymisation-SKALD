@@ -4,7 +4,7 @@ import tempfile
 import shutil
 import builtins
 from io import StringIO
-from chunkanon.utils import (
+from SKALD.utils import (
     log, log_to_file, ensure_folder,
     save_dict_to_json, get_progress_iter, format_time
 )

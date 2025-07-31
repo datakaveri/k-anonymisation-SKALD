@@ -65,8 +65,8 @@ class QuasiIdentifiers(BaseModel):
         categorical (List[CategoricalQuasiIdentifier]): List of categorical QIDs.
     """
 
-    numerical: List[NumericalQuasiIdentifier]
-    categorical: List[CategoricalQuasiIdentifier]
+    numerical: List[NumericalQuasiIdentifier] = Field(default_factory=list)
+    categorical: List[CategoricalQuasiIdentifier] = Field(default_factory=list)
     '''
     @model_validator(mode="after")
     def check_at_least_one_numerical(cls, values):

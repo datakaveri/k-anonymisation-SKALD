@@ -2,7 +2,7 @@ import unittest
 import os
 import tempfile
 import yaml
-from chunkanon.config_validation import load_config
+from SKALD.config_validation import load_config
 from pydantic import ValidationError
 
 

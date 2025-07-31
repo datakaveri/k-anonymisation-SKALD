@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from chunkanon.generalization_rf import OLA_2
+from SKALD.generalization_rf import OLA_2
 from types import SimpleNamespace
 import os
 import json

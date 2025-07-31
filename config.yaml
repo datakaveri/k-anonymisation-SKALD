@@ -1,11 +1,11 @@
 # config.yaml
 
 number_of_chunks: 1
-k: 50
-l: 6
+k: 1
+l: 1
 
-max_number_of_eq_classes: 62500
-suppression_limit: 0.0005
+max_number_of_eq_classes: 12500000000000000000000
+suppression_limit: 1
 
 chunk_directory: small_data
 output_path: generalized_chunk1.csv
@@ -13,19 +13,9 @@ log_file: log.txt
 save_output: true
 
 quasi_identifiers:
-  numerical:
-    - column: Age
-      encode: false
-      type: int
-    - column: PIN Code
-      encode: true
-      type: int
-    - column: BMI
-      encode: true
-      type: float
   categorical: 
     - column : Blood Group
-    - column : Gender
+
 
 sensitive_parameter : Health Condition
 bin_width_multiplication_factor:

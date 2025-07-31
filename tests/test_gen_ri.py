@@ -1,6 +1,6 @@
 import pytest
-from chunkanon.generalization_ri import OLA_1
-from chunkanon.quasi_identifier import QuasiIdentifier
+from SKALD.generalization_ri import OLA_1
+from SKALD.quasi_identifier import QuasiIdentifier
 
 
 @pytest.fixture

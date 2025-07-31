@@ -1,5 +1,5 @@
 import math
-from chunkanon.categorical import CategoricalGeneralizer
+from SKALD.categorical import CategoricalGeneralizer
 
 class OLA_1:
     """
@@ -127,12 +127,12 @@ class OLA_1:
                 else:
                     max_level = 4
 
-                precision += bin_width / max_levels
+                precision += bin_width / max_level
             else:
                 base = self.multiplication_factors[qi.column_name[:-8]] if qi.is_encoded else self.multiplication_factors[qi.column_name]
-                max_levels = math.ceil(math.log(qi.get_range(), base)) + 2
+                max_level = math.ceil(math.log(qi.get_range(), base)) + 2
                 level = math.ceil(math.log(bin_width, base)) + 2
-                precision += level / max_levels
+                precision += level / max_level
 
         return precision
 
@@ -160,13 +160,14 @@ class OLA_1:
             sorted_nodes = sorted(
                 [node for node in self.tree[mid_level] if self.node_status.get(tuple(node)) is None]
             )
-
+            print(sorted_nodes)
             for node in sorted_nodes:
                 if self.node_status.get(tuple(node)) is not None:
                     continue
 
                 classes = self.calculate_equivalence_classes(node)
-                #print(f"No. of Equivalence classes for node : {node}, is {classes}" )
+                print(f"No. of Equivalence classes for node : {node}, is {classes}" )
+
                 if classes <= self.max_equivalence_classes:
                     self._mark_subtree_pass(node)
                 else:

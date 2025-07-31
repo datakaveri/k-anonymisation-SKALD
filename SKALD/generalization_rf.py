@@ -6,7 +6,7 @@ import numpy as np
 from tqdm import tqdm
 
 from collections import defaultdict
-from chunkanon.categorical import CategoricalGeneralizer
+from SKALD.categorical import CategoricalGeneralizer
 
 
 class OLA_2:
@@ -355,16 +355,18 @@ class OLA_2:
                         for i in range(len(bin_edges) - 1)
                     ]
 
-                    gen_chunk[col] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True)
+                    gen_chunk[col] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True,right=False)
 
                 else:
-                    bin_edges = np.arange(qi.min_value, col_data.max() + bw, bw)
+                    min_edge = (col_data.min() // bw) * bw
+                    max_edge = ((col_data.max() + bw - 1) // bw) * bw + 1
+                    bin_edges = np.arange(min_edge, max_edge, bw)
                     labels = [
                         f"[{int(bin_edges[i])}-{int(bin_edges[i + 1] - 1)}]"
                         for i in range(len(bin_edges) - 1)
                     ]
 
-                    gen_chunk[col] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True)
+                    gen_chunk[col] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True,right=False)
 
         return gen_chunk
     

@@ -431,3 +431,281 @@
 [2025-07-07 14:36:44] Initial bin widths (Ri): [1, 1, 32, 3, 2]
 [2025-07-24 15:08:51] Initial bin widths (Ri): [1, 1, 32, 3, 2]
 [2025-07-24 15:09:32] Initial bin widths (Ri): [1, 1, 16, 3, 2]
+[2025-07-24 16:07:06] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:07:06] Final bin widths (RF): [4, 3]
+[2025-07-24 16:07:06] Chunks: 1, k: 10
+[2025-07-24 16:07:06] Total time taken: 0h 0m 0s
+[2025-07-24 16:19:59] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:20:00] Final bin widths (RF): [4, 3]
+[2025-07-24 16:20:00] Chunks: 1, k: 10
+[2025-07-24 16:20:00] Total time taken: 0h 0m 0s
+[2025-07-24 16:29:51] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:29:51] Final bin widths (RF): [4, 3]
+[2025-07-24 16:29:51] Chunks: 1, k: 10
+[2025-07-24 16:29:51] Total time taken: 0h 0m 0s
+[2025-07-24 16:30:35] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:30:35] Final bin widths (RF): [4, 3]
+[2025-07-24 16:30:35] Chunks: 1, k: 10
+[2025-07-24 16:30:35] Total time taken: 0h 0m 0s
+[2025-07-24 16:31:21] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:31:21] Final bin widths (RF): [4, 3]
+[2025-07-24 16:31:21] Chunks: 1, k: 10
+[2025-07-24 16:31:21] Total time taken: 0h 0m 0s
+[2025-07-24 16:32:08] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:32:08] Final bin widths (RF): [4, 3]
+[2025-07-24 16:32:08] Chunks: 1, k: 10
+[2025-07-24 16:32:08] Total time taken: 0h 0m 0s
+[2025-07-24 16:39:51] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:39:51] Final bin widths (RF): [4, 3]
+[2025-07-24 16:39:51] Chunks: 1, k: 10
+[2025-07-24 16:39:51] Total time taken: 0h 0m 0s
+[2025-07-24 16:44:30] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:44:30] Final bin widths (RF): [1, 2]
+[2025-07-24 16:44:30] Chunks: 1, k: 10
+[2025-07-24 16:44:30] Total time taken: 0h 0m 0s
+[2025-07-24 16:45:30] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:45:30] Final bin widths (RF): [4, 3]
+[2025-07-24 16:45:30] Chunks: 1, k: 10
+[2025-07-24 16:45:30] Total time taken: 0h 0m 0s
+[2025-07-24 16:46:49] Initial bin widths (Ri): [1, 1]
+[2025-07-24 16:46:49] Final bin widths (RF): [4, 3]
+[2025-07-24 16:46:49] Chunks: 1, k: 10
+[2025-07-24 16:46:49] Total time taken: 0h 0m 0s
+[2025-07-24 17:02:13] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:02:13] Final bin widths (RF): [4, 3]
+[2025-07-24 17:03:57] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:03:57] Final bin widths (RF): [4, 3]
+[2025-07-24 17:34:23] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:34:23] Final bin widths (RF): [4, 3]
+[2025-07-24 17:36:17] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:36:17] Final bin widths (RF): [4, 3]
+[2025-07-24 17:36:17] Chunks: 1, k: 10
+[2025-07-24 17:36:17] Total time taken: 0h 0m 0s
+[2025-07-24 17:37:01] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:37:01] Final bin widths (RF): [4, 3]
+[2025-07-24 17:37:01] Chunks: 1, k: 10
+[2025-07-24 17:37:01] Total time taken: 0h 0m 0s
+[2025-07-24 17:37:59] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:37:59] Final bin widths (RF): [1, 2]
+[2025-07-24 17:37:59] Chunks: 1, k: 10
+[2025-07-24 17:37:59] Total time taken: 0h 0m 0s
+[2025-07-24 17:40:48] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:40:48] Final bin widths (RF): [4, 3]
+[2025-07-24 17:40:48] Chunks: 1, k: 10
+[2025-07-24 17:40:48] Total time taken: 0h 0m 0s
+[2025-07-24 17:46:03] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:46:03] Final bin widths (RF): [4, 3]
+[2025-07-24 17:46:03] Chunks: 1, k: 10
+[2025-07-24 17:46:03] Total time taken: 0h 0m 0s
+[2025-07-24 17:46:59] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:46:59] Final bin widths (RF): [4, 3]
+[2025-07-24 17:46:59] Chunks: 1, k: 10
+[2025-07-24 17:46:59] Total time taken: 0h 0m 0s
+[2025-07-24 17:50:30] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:50:30] Final bin widths (RF): [4, 3]
+[2025-07-24 17:50:30] Chunks: 1, k: 10
+[2025-07-24 17:50:30] Total time taken: 0h 0m 0s
+[2025-07-24 17:59:15] Initial bin widths (Ri): [1, 1]
+[2025-07-24 17:59:15] Final bin widths (RF): [4, 3]
+[2025-07-24 17:59:15] Chunks: 1, k: 10
+[2025-07-24 17:59:15] Total time taken: 0h 0m 0s
+[2025-07-29 14:31:43] Initial bin widths (Ri): [1, 1, 1]
+[2025-07-29 14:31:44] Final bin widths (RF): [4, 104.0, 3]
+[2025-07-29 14:31:44] Chunks: 1, k: 10
+[2025-07-29 14:31:44] Total time taken: 0h 0m 1s
+[2025-07-29 14:44:37] Initial bin widths (Ri): [1, 1]
+[2025-07-29 14:44:37] Final bin widths (RF): [4, 3]
+[2025-07-29 14:44:37] Chunks: 1, k: 10
+[2025-07-29 14:44:37] Total time taken: 0h 0m 0s
+[2025-07-29 14:45:41] Initial bin widths (Ri): [1, 1]
+[2025-07-29 14:45:41] Final bin widths (RF): [4, 3]
+[2025-07-29 14:45:41] Chunks: 1, k: 10
+[2025-07-29 14:45:41] Total time taken: 0h 0m 0s
+[2025-07-29 14:46:01] Initial bin widths (Ri): [1, 1]
+[2025-07-29 14:46:01] Final bin widths (RF): [4, 3]
+[2025-07-29 14:46:01] Chunks: 1, k: 10
+[2025-07-29 14:46:01] Total time taken: 0h 0m 0s
+[2025-07-29 14:50:18] Initial bin widths (Ri): [1, 1, 1]
+[2025-07-29 14:50:19] Final bin widths (RF): [4, 104.0, 3]
+[2025-07-29 14:50:19] Chunks: 1, k: 10
+[2025-07-29 14:50:19] Total time taken: 0h 0m 1s
+[2025-07-29 14:50:49] Initial bin widths (Ri): [1, 1, 1]
+[2025-07-29 14:50:50] Final bin widths (RF): [4, 104.0, 3]
+[2025-07-29 14:50:50] Chunks: 1, k: 10
+[2025-07-29 14:50:50] Total time taken: 0h 0m 1s
+[2025-07-29 14:51:42] Initial bin widths (Ri): [1, 1]
+[2025-07-29 14:51:42] Final bin widths (RF): [4, 3]
+[2025-07-29 14:51:42] Chunks: 1, k: 10
+[2025-07-29 14:51:42] Total time taken: 0h 0m 0s
+[2025-07-29 14:52:16] Initial bin widths (Ri): [1, 1]
+[2025-07-29 14:52:16] Final bin widths (RF): [4, 3]
+[2025-07-29 14:52:16] Chunks: 1, k: 10
+[2025-07-29 14:52:16] Total time taken: 0h 0m 0s
+[2025-07-29 14:57:16] Initial bin widths (Ri): [1, 1]
+[2025-07-29 14:57:16] Final bin widths (RF): [4, 3]
+[2025-07-29 14:57:16] Chunks: 1, k: 10
+[2025-07-29 14:57:16] Total time taken: 0h 0m 0s
+[2025-07-29 15:01:45] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:01:45] Final bin widths (RF): [4, 3]
+[2025-07-29 15:01:45] Chunks: 1, k: 10
+[2025-07-29 15:01:45] Total time taken: 0h 0m 0s
+[2025-07-29 15:03:52] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:03:52] Final bin widths (RF): [4, 3]
+[2025-07-29 15:03:52] Chunks: 1, k: 10
+[2025-07-29 15:03:52] Total time taken: 0h 0m 0s
+[2025-07-29 15:05:04] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:05:04] Final bin widths (RF): [4, 3]
+[2025-07-29 15:05:04] Chunks: 1, k: 10
+[2025-07-29 15:05:04] Total time taken: 0h 0m 0s
+[2025-07-29 15:07:35] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:07:35] Final bin widths (RF): [4, 3]
+[2025-07-29 15:07:35] Chunks: 1, k: 10
+[2025-07-29 15:07:35] Total time taken: 0h 0m 0s
+[2025-07-29 15:10:50] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:10:50] Final bin widths (RF): [4, 3]
+[2025-07-29 15:10:50] Chunks: 1, k: 10
+[2025-07-29 15:10:50] Total time taken: 0h 0m 0s
+[2025-07-29 15:13:42] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:13:42] Final bin widths (RF): [4, 3]
+[2025-07-29 15:13:42] Chunks: 1, k: 10
+[2025-07-29 15:13:42] Total time taken: 0h 0m 0s
+[2025-07-29 15:16:14] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:16:14] Final bin widths (RF): [4, 3]
+[2025-07-29 15:16:14] Chunks: 1, k: 10
+[2025-07-29 15:16:14] Total time taken: 0h 0m 0s
+[2025-07-29 15:18:43] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:18:43] Final bin widths (RF): [4, 3]
+[2025-07-29 15:18:43] Chunks: 1, k: 10
+[2025-07-29 15:18:43] Total time taken: 0h 0m 0s
+[2025-07-29 15:21:14] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:21:14] Final bin widths (RF): [1, 3]
+[2025-07-29 15:21:14] Chunks: 1, k: 2
+[2025-07-29 15:21:14] Total time taken: 0h 0m 0s
+[2025-07-29 15:23:26] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:23:26] Final bin widths (RF): [1, 3]
+[2025-07-29 15:23:26] Chunks: 1, k: 2
+[2025-07-29 15:23:26] Total time taken: 0h 0m 0s
+[2025-07-29 15:23:52] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:23:52] Final bin widths (RF): [4, 2]
+[2025-07-29 15:23:52] Chunks: 1, k: 4
+[2025-07-29 15:23:52] Total time taken: 0h 0m 0s
+[2025-07-29 15:24:06] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:24:06] Final bin widths (RF): [4, 3]
+[2025-07-29 15:24:06] Chunks: 1, k: 10
+[2025-07-29 15:24:06] Total time taken: 0h 0m 0s
+[2025-07-29 15:24:21] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:24:21] Final bin widths (RF): [4, 3]
+[2025-07-29 15:24:21] Chunks: 1, k: 10
+[2025-07-29 15:24:21] Total time taken: 0h 0m 0s
+[2025-07-29 15:25:14] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:25:14] Final bin widths (RF): [1, 3]
+[2025-07-29 15:25:14] Chunks: 2, k: 1
+[2025-07-29 15:25:14] Total time taken: 0h 0m 0s
+[2025-07-29 15:26:12] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:26:12] Final bin widths (RF): [1, 3]
+[2025-07-29 15:26:12] Chunks: 1, k: 1
+[2025-07-29 15:26:12] Total time taken: 0h 0m 0s
+[2025-07-29 15:30:22] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:30:22] Final bin widths (RF): [1, 3]
+[2025-07-29 15:30:22] Chunks: 1, k: 1
+[2025-07-29 15:30:22] Total time taken: 0h 0m 0s
+[2025-07-29 15:38:36] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:38:36] Final bin widths (RF): [1, 1]
+[2025-07-29 15:38:36] Chunks: 1, k: 1
+[2025-07-29 15:38:36] Total time taken: 0h 0m 0s
+[2025-07-29 15:38:47] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:38:47] Final bin widths (RF): [1, 1]
+[2025-07-29 15:38:48] Chunks: 1, k: 1
+[2025-07-29 15:38:48] Total time taken: 0h 0m 0s
+[2025-07-29 15:40:15] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:40:16] Final bin widths (RF): [1, 3]
+[2025-07-29 15:40:16] Chunks: 1, k: 1
+[2025-07-29 15:40:16] Total time taken: 0h 0m 0s
+[2025-07-29 15:41:01] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:41:01] Final bin widths (RF): [1, 3]
+[2025-07-29 15:41:01] Chunks: 1, k: 1
+[2025-07-29 15:41:01] Total time taken: 0h 0m 0s
+[2025-07-29 15:41:37] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:41:38] Final bin widths (RF): [1, 3]
+[2025-07-29 15:41:38] Chunks: 1, k: 1
+[2025-07-29 15:41:38] Total time taken: 0h 0m 0s
+[2025-07-29 15:41:53] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:41:53] Final bin widths (RF): [1, 3]
+[2025-07-29 15:41:53] Chunks: 1, k: 1
+[2025-07-29 15:41:53] Total time taken: 0h 0m 0s
+[2025-07-29 15:42:16] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:42:16] Final bin widths (RF): [1, 3]
+[2025-07-29 15:42:17] Chunks: 1, k: 1
+[2025-07-29 15:42:17] Total time taken: 0h 0m 0s
+[2025-07-29 15:45:47] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:45:47] Final bin widths (RF): [1, 1]
+[2025-07-29 15:45:47] Chunks: 1, k: 1
+[2025-07-29 15:45:47] Total time taken: 0h 0m 0s
+[2025-07-29 15:48:23] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:48:23] Final bin widths (RF): [1, 1]
+[2025-07-29 15:48:23] Chunks: 1, k: 1
+[2025-07-29 15:48:23] Total time taken: 0h 0m 0s
+[2025-07-29 15:48:37] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:48:37] Final bin widths (RF): [1, 3]
+[2025-07-29 15:48:37] Chunks: 1, k: 10
+[2025-07-29 15:48:37] Total time taken: 0h 0m 0s
+[2025-07-29 15:48:45] Initial bin widths (Ri): [1, 1]
+[2025-07-29 15:48:45] Final bin widths (RF): [1, 3]
+[2025-07-29 15:48:45] Chunks: 1, k: 10
+[2025-07-29 15:48:45] Total time taken: 0h 0m 0s
+[2025-07-29 16:10:08] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:10:08] Final bin widths (RF): [1, 3]
+[2025-07-29 16:10:08] Chunks: 1, k: 10
+[2025-07-29 16:10:08] Total time taken: 0h 0m 0s
+[2025-07-29 16:10:57] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:10:57] Final bin widths (RF): [1, 3]
+[2025-07-29 16:10:57] Chunks: 1, k: 10
+[2025-07-29 16:10:57] Total time taken: 0h 0m 0s
+[2025-07-29 16:11:57] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:11:58] Final bin widths (RF): [1, 2]
+[2025-07-29 16:11:58] Chunks: 5, k: 10
+[2025-07-29 16:11:58] Total time taken: 0h 0m 0s
+[2025-07-29 16:13:21] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:13:21] Final bin widths (RF): [1, 1]
+[2025-07-29 16:13:21] Chunks: 2, k: 1
+[2025-07-29 16:13:21] Total time taken: 0h 0m 0s
+[2025-07-29 16:15:44] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:15:44] Final bin widths (RF): [1, 1]
+[2025-07-29 16:15:44] Chunks: 2, k: 1
+[2025-07-29 16:15:44] Total time taken: 0h 0m 0s
+[2025-07-29 16:17:09] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:17:10] Final bin widths (RF): [1, 1]
+[2025-07-29 16:17:10] Chunks: 2, k: 2
+[2025-07-29 16:17:10] Total time taken: 0h 0m 0s
+[2025-07-29 16:17:28] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:17:28] Final bin widths (RF): [1, 3]
+[2025-07-29 16:17:28] Chunks: 2, k: 10
+[2025-07-29 16:17:28] Total time taken: 0h 0m 0s
+[2025-07-29 16:18:20] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:18:20] Final bin widths (RF): [1, 3]
+[2025-07-29 16:18:20] Chunks: 2, k: 10
+[2025-07-29 16:18:20] Total time taken: 0h 0m 0s
+[2025-07-29 16:18:44] Initial bin widths (Ri): [1, 1]
+[2025-07-29 16:18:44] Final bin widths (RF): [1, 3]
+[2025-07-29 16:18:44] Chunks: 2, k: 10
+[2025-07-29 16:18:44] Total time taken: 0h 0m 0s
+[2025-07-29 18:21:27] Initial bin widths (Ri): [1, 1]
+[2025-07-29 18:21:27] Final bin widths (RF): [1, 3]
+[2025-07-29 18:21:27] Chunks: 1, k: 10
+[2025-07-29 18:21:27] Total time taken: 0h 0m 0s
+[2025-07-29 18:24:41] Initial bin widths (Ri): [1, 1]
+[2025-07-29 18:24:41] Final bin widths (RF): [1, 3]
+[2025-07-29 18:24:41] Chunks: 1, k: 10
+[2025-07-29 18:24:41] Total time taken: 0h 0m 0s
+[2025-07-29 18:33:25] Initial bin widths (Ri): [1, 1]
+[2025-07-29 18:33:25] Final bin widths (RF): [1, 3]
+[2025-07-29 18:33:25] Chunks: 1, k: 11
+[2025-07-29 18:33:25] Total time taken: 0h 0m 0s
+[2025-07-29 18:34:51] Initial bin widths (Ri): [1, 1]
+[2025-07-29 18:34:51] Final bin widths (RF): [1, 3]
+[2025-07-29 18:34:51] Chunks: 1, k: 11
+[2025-07-29 18:34:51] Total time taken: 0h 0m 0s
+[2025-07-31 13:40:18] Initial bin widths (Ri): [1]
+[2025-07-31 13:40:18] Final bin widths (RF): [1]
+[2025-07-31 13:40:19] Chunks: 1, k: 1
+[2025-07-31 13:40:19] Total time taken: 0h 0m 0s

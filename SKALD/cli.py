@@ -1,8 +1,8 @@
 import argparse
-from chunkanon.core import run_pipeline
+from SKALD.core import run_pipeline
 
 def main():
-    parser = argparse.ArgumentParser(description="Run ChunKanon k-anonymization.")
+    parser = argparse.ArgumentParser(description="Run SKALD.")
     parser.add_argument('--config', type=str, default='config.yaml', help='Path to YAML config file')
     parser.add_argument('--k', type=int, default=None, help='Override k from config')
     parser.add_argument('--chunks', type=int, default=None, help='Override number of chunks from config')

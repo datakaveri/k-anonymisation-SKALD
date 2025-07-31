@@ -1,0 +1,19 @@
+number_of_chunks: 1
+k: 11
+l: 1
+max_number_of_eq_classes: 12500
+suppression_limit: 1
+chunk_directory: small_datachunks
+output_path: generalized_chunk1.csv
+log_file: log.txt
+save_output: true
+quasi_identifiers:
+  numerical: [{column: Age, encode: false, type: int}]
+  categorical: [{column: Blood Group}]
+sensitive_parameter: Health Condition
+bin_width_multiplication_factor:
+  Age: 3
+hardcoded_min_max:
+  Age: [19, 85]
+  BMI: [12.7, 35.8]
+  PIN Code: [560001, 591346]

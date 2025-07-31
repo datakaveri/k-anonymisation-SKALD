@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from chunkanon.quasi_identifier import QuasiIdentifier  # Adjust the import if needed
+from SKALD.quasi_identifier import QuasiIdentifier  # Adjust the import if needed
 
 def test_numerical_qi_initialization_and_range():
     qi = QuasiIdentifier(column_name="Age", is_categorical=False, min_value=20, max_value=50)

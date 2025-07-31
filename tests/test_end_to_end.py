@@ -5,7 +5,7 @@ import shutil
 import yaml
 import pytest
 from unittest.mock import patch
-from chunkanon.core import run_pipeline
+from SKALD.core import run_pipeline
 
 
 def test_run_pipeline_minimal():

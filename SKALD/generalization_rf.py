@@ -295,25 +295,50 @@ class OLA_2:
                         q.append(parent)
                         if pbar: pbar.update(1)
 
-    def find_best_rf(self, histogram, pass_nodes, k,sensitive_sets):
+    def find_best_rf(self, histogram, pass_nodes, k, sensitive_sets):
         best_node = None
         lowest_dm_star = float('inf')
+        best_num_eq_classes = None  # ← add this line
+
         print("\nPassing nodes and their DM* values:")
         for node in pass_nodes:
-            merged_hist,_ = self.merge_equivalence_classes(histogram.copy(),sensitive_sets, list(node))
+            merged_hist, _ = self.merge_equivalence_classes(histogram.copy(), sensitive_sets, list(node))
             low_count_sum = np.sum(merged_hist[merged_hist < k])
             dm_star = np.sum(merged_hist[merged_hist >= k] ** 2) + low_count_sum ** 2
-            supp_percent = self.get_suppressed_percent(node,histogram,k)
-            print(f"Node: {list(node)}, DM*: {dm_star}, percent of records suppressed :{supp_percent}")
+            num_eq_classes = np.sum(merged_hist > 0)  # ← count equivalence classes
+            supp_percent = self.get_suppressed_percent(node, histogram, k)
+            #print(f"Node: {list(node)}, DM*: {dm_star}, EQ Classes: {num_eq_classes}, Suppressed: {supp_percent:.2f}%")
+
             if dm_star <= lowest_dm_star:
                 lowest_dm_star = dm_star
                 best_node = node
+                best_num_eq_classes = num_eq_classes  # ← store the best one
 
         self.smallest_passing_rf = best_node
+        self.lowest_dm_star = lowest_dm_star       # ← save as instance variable
+        self.best_num_eq_classes = best_num_eq_classes  # ← save as instance variable
+
         if best_node is not None:
             print(f"\nBest Node: {list(best_node)}, Final DM*: {lowest_dm_star}")
         else:
             print("No best node found.")
+
+        
+    def get_equivalence_class_stats(self, histogram, bin_widths, k):
+        """
+        Returns a dictionary {eq_class_size: count}, only for retained (non-suppressed) equivalence classes.
+        Suppressed classes (with size < k) are ignored.
+        """
+        merged_histogram, _ = self.merge_equivalence_classes(histogram, self.sensitive_sets, bin_widths)
+        stats = defaultdict(int)
+
+        flat = merged_histogram.flatten()
+        for count in flat:
+            if count >= k:
+                stats[int(count)] += 1
+
+        return dict(stats)
+
 
     def generalize_chunk(self, chunk, bin_widths):
         """

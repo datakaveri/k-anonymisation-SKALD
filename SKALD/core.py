@@ -9,6 +9,7 @@ import json
 from SKALD.quasi_identifier import QuasiIdentifier
 from SKALD.generalization_ri import OLA_1  # Initial generalization tree builder
 from SKALD.generalization_rf import OLA_2  # Final generalization and histogram merger
+from SKALD.preprocess import suppress, pseudonymize
 from SKALD.utils import get_progress_iter, log_to_file, format_time, ensure_folder
 from SKALD.config_validation import load_config
 
@@ -29,6 +30,8 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
     output_path = config.output_path
     suppression_limit = config.suppression_limit
     max_equivalence_classes = config.max_number_of_eq_classes
+    suppressed_columns = config.suppress
+    pseudonymized_columns = config.pseudonymize
     sensitive_paramter = config.sensitive_parameter
     log_file = config.log_file
     save_output = config.save_output
@@ -50,7 +53,6 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
         raise ValueError("No CSV files found in the chunk directory.")
 
     chunk_files = all_files[:n]
-
     print(f"Processing {n} chunks from {chunk_dir}...")
 
     encoding_maps = {}
@@ -63,101 +65,96 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
         decimals = series.dropna().map(lambda x: len(str(x).split(".")[1]) if "." in str(x) else 0)
         return decimals.max()
 
-    if numerical_columns_info:
-        for info in numerical_columns_info:
-            column = info.get("column")
-            column_type = info.get("type", "float")
+    # ENCODING NUMERICAL COLUMNS (only if encode=True)
+    for info in numerical_columns_info:
+        column = info.get("column")
+        column_type = info.get("type", "float")
+        encode = info.get("encode", False)
 
-            if not column:
-                raise ValueError("Missing 'column' key in numerical_columns_info.")
+        if not encode:
+            print(f"Skipping encoding for column '{column}' as encode is set to False.")
+            continue
 
-            all_unique_values = set()
-            multiplier = 1
-            encoded_column = f"{column}_encoded"
+        if not column:
+            raise ValueError("Missing 'column' key in numerical_columns_info.")
 
-            for filename in chunk_files:
-                chunk = pd.read_csv(os.path.join(chunk_dir, filename))
-                values = chunk[column].dropna()
+        all_unique_values = set()
+        multiplier = 1
+        encoded_column = f"{column}_encoded"
 
-                if column_type == "float":
-                    decimal_places = find_max_decimal_places(values)
-                    multiplier = 10 ** decimal_places
-                    chunk[encoded_column] = (values * multiplier).round().astype(int)
-                else:
-                    chunk[encoded_column] = chunk[column].astype(int)
+        for filename in chunk_files:
+            chunk = pd.read_csv(os.path.join(chunk_dir, filename))
+            working_chunk = chunk.copy()
 
-                all_unique_values.update(chunk[encoded_column].unique())
-                chunk.to_csv(os.path.join(chunk_dir, filename), index=False)
+            if suppressed_columns:
+                working_chunk = suppress(working_chunk, suppressed_columns)
+            if pseudonymized_columns:
+                working_chunk = pseudonymize(working_chunk, pseudonymized_columns)
 
-            sorted_values = sorted(all_unique_values)
-            encoding_map = {val: idx+1 for idx, val in enumerate(sorted_values)}
-            encoding_map = {int(k): v for k, v in encoding_map.items()}
-            decoding_map = {idx+1 : val for idx, val in enumerate(sorted_values)}
+            values = working_chunk[column].dropna()
 
-            encoding_maps[column] = {
-                "decoding_map": {
-                    int(k): int(v) if isinstance(v, (int, np.integer)) else float(v) if isinstance(v, (float, np.floating)) else v
-                    for k, v in decoding_map.items()
-                },
-                "multiplier": int(multiplier) if isinstance(multiplier, (np.integer, np.int64)) else float(multiplier),
-                "type": column_type
-            }
+            if column_type == "float":
+                decimal_places = find_max_decimal_places(values)
+                multiplier = 10 ** decimal_places
+                working_chunk[encoded_column] = (values * multiplier).round().astype(int)
+            else:
+                working_chunk[encoded_column] = working_chunk[column].astype(int)
 
-            try:
-                with open(os.path.join(encoding_dir, f"{column.replace(' ','_').lower()}_encoding.json"), "w") as f:
-                    json.dump(encoding_maps[column], f, indent=4)
-            except Exception as e:
-                print(f"Error saving encoding map for {column}: {e}")
+            all_unique_values.update(working_chunk[encoded_column].unique())
 
-            for i in get_progress_iter(range(n), desc=f"Encoding {column}"):
-                chunk_path = os.path.join(chunk_dir, chunk_files[i])
-                try:
-                    chunk = pd.read_csv(chunk_path)
-                    chunk[encoded_column] = (chunk[column]*multiplier).map(encoding_map)
-                    chunk.to_csv(chunk_path, index=False)
-                except Exception as e:
-                    print(f"Error encoding column {column} in {chunk_path}: {e}")
-    else:
-        print("No numerical columns to encode.")
+        sorted_values = sorted(all_unique_values)
+        encoding_map = {val: idx+1 for idx, val in enumerate(sorted_values)}
+        encoding_map = {int(k): v for k, v in encoding_map.items()}
+        decoding_map = {idx+1: val for idx, val in enumerate(sorted_values)}
 
+        encoding_maps[column] = {
+            "decoding_map": decoding_map,
+            "multiplier": int(multiplier),
+            "type": column_type
+        }
+
+        try:
+            with open(os.path.join(encoding_dir, f"{column.replace(' ','_').lower()}_encoding.json"), "w") as f:
+                json.dump(encoding_maps[column], f, indent=4)
+        except Exception as e:
+            print(f"Error saving encoding map for {column}: {e}")
+
+    # DEFINE QUASI-IDENTIFIERS
     quasi_identifiers = []
     all_quasi_columns = []
 
-    if numerical_columns_info:
-        for info in numerical_columns_info:
-            column = info.get("column")
-            if not column:
-                continue
+    for info in numerical_columns_info:
+        column = info.get("column")
+        if not column:
+            continue
 
-            encode = info.get("encode", False)
-            encoded_column = f"{column}_encoded" if encode else column
+        encode = info.get("encode", False)
+        encoded_column = f"{column}_encoded" if encode else column
 
-            if encode:
-                decoding_map = encoding_maps.get(column, {}).get("decoding_map", {})
-                if decoding_map:
-                    min_val, max_val = 1, len(decoding_map)
-                else:
-                    print(f"Warning: No decoding map found for encoded column '{column}'. Skipping.")
-                    continue
+        if encode:
+            decoding_map = encoding_maps.get(column, {}).get("decoding_map", {})
+            if decoding_map:
+                min_val, max_val = 1, len(decoding_map)
             else:
-                min_max = hardcoded_min_max.get(column)
-                if not min_max or len(min_max) != 2:
-                    print(f"Warning: Missing or invalid hardcoded min/max for column '{column}'. Skipping.")
-                    continue
-                min_val, max_val = min_max
+                print(f"Warning: No decoding map found for encoded column '{column}'. Skipping.")
+                continue
+        else:
+            min_max = hardcoded_min_max.get(column)
+            if not min_max or len(min_max) != 2:
+                print(f"Warning: Missing or invalid hardcoded min/max for column '{column}'. Skipping.")
+                continue
+            min_val, max_val = min_max
 
-            all_quasi_columns.append(encoded_column)
-            quasi_identifiers.append(
-                QuasiIdentifier(
-                    encoded_column,
-                    is_categorical=False,
-                    is_encoded=encode,
-                    min_value=min_val,
-                    max_value=max_val
-                )
+        all_quasi_columns.append(encoded_column)
+        quasi_identifiers.append(
+            QuasiIdentifier(
+                encoded_column,
+                is_categorical=False,
+                is_encoded=encode,
+                min_value=min_val,
+                max_value=max_val
             )
-    else:
-        print("Warning: No numerical quasi-identifiers found.")
+        )
 
     if categorical_columns:
         for column in categorical_columns:
@@ -167,8 +164,6 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
             quasi_identifiers.append(
                 QuasiIdentifier(column, is_categorical=True, is_encoded=False)
             )
-    else:
-        print("Warning: No categorical quasi-identifiers found.")
 
     if not quasi_identifiers:
         raise ValueError("No quasi-identifiers defined. Please specify at least one categorical or numerical QID.")
@@ -184,6 +179,7 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
         except Exception as e:
             print(f"Error reading first chunk: {e}")
 
+    # BUILD INITIAL GENERALIZATION TREE
     print("\nBuilding initial tree and finding Ri values...")
     ola_1 = OLA_1(quasi_identifiers, n, max_equivalence_classes, multiplication_factors)
     ola_1.build_tree()
@@ -196,12 +192,37 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
     print("\nBuilding second tree with initial Ri values as root...")
     ola_2.build_tree(initial_ri)
 
+    # PROCESS CHUNKS FOR HISTOGRAMS
     print("\nProcessing data in chunks for histograms...")
     histograms = []
     for i in range(n):
         try:
             chunk = pd.read_csv(os.path.join(chunk_dir, chunk_files[i]))
-            chunk_histogram = ola_2.process_chunk(chunk, initial_ri)
+            working_chunk = chunk.copy()
+
+            if suppressed_columns:
+                working_chunk = suppress(working_chunk, suppressed_columns)
+            if pseudonymized_columns:
+                working_chunk = pseudonymize(working_chunk, pseudonymized_columns)
+
+            # Add encoded columns (in-memory)
+            for info in numerical_columns_info:
+                column = info.get("column")
+                encode = info.get("encode", False)
+                column_type = info.get("type", "float")
+                if encode:
+                    multiplier = encoding_maps[column]["multiplier"]
+                    encoded_column = f"{column}_encoded"
+                    if column_type == "float":
+                        working_chunk[encoded_column] = (working_chunk[column] * multiplier).round().astype(int).map(
+                            encoding_maps[column]["decoding_map"]
+                        )
+                    else:
+                        working_chunk[encoded_column] = working_chunk[column].map(
+                            encoding_maps[column]["decoding_map"]
+                        )
+
+            chunk_histogram = ola_2.process_chunk(working_chunk, initial_ri)
             histograms.append(chunk_histogram)
             print(f"Processed chunk {i+1}/{n} for histograms.")
         except Exception as e:
@@ -213,30 +234,31 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
     global_histogram = ola_2.merge_histograms(histograms)
     final_rf = ola_2.get_final_binwidths(global_histogram, k, l)
     supp_percent = ola_2.get_suppressed_percent(final_rf, global_histogram, k)
+    lowest_dm_star = ola_2.lowest_dm_star
+    num_eq_classes = ola_2.best_num_eq_classes
+    eq_class_stats = ola_2.get_equivalence_class_stats(global_histogram, final_rf, k)
+
+    print("Lowest DM*:", lowest_dm_star)
+    print("Number of equivalence classes:", num_eq_classes)
+    print("EQ Class Stats:", eq_class_stats)
     print("Final bin widths (RF):", final_rf)
-    print("suppressed percentage of records :", supp_percent)
+    print("Suppressed percentage of records:", supp_percent)
     log_to_file(f"Final bin widths (RF): {final_rf}", log_file)
 
+    # OUTPUT GENERALIZED CHUNK (only output_path)
     if save_output and chunk_files:
         print("\nGeneralizing first chunk based on RF...")
-        #print(type(final_rf))
         first_chunk = pd.read_csv(os.path.join(chunk_dir, chunk_files[0]))
-        generalized_chunk = ola_2.generalize_chunk(first_chunk, final_rf)
+        working_chunk = first_chunk.copy()
+
+        if suppressed_columns:
+            working_chunk = suppress(working_chunk, suppressed_columns)
+        if pseudonymized_columns:
+            working_chunk = pseudonymize(working_chunk, pseudonymized_columns)
+
+        generalized_chunk = ola_2.generalize_chunk(working_chunk, final_rf)
         generalized_chunk.to_csv(output_path, index=False)
         print(f"Generalized first chunk saved to: {output_path}")
-
-    for chunks in chunk_files:
-        chunk_path = os.path.join(chunk_dir, chunks)
-        chunk = pd.read_csv(chunk_path)
-
-        for info in numerical_columns_info:
-            column = info.get("column")
-            if info.get("encode", True):
-                encoded_column = f"{column}_encoded"
-                if encoded_column in chunk.columns:
-                    chunk = chunk.drop(columns=[encoded_column], errors='ignore')
-
-        chunk.to_csv(chunk_path, index=False)
 
     elapsed_time = time.time() - start_time
     h, m, s = format_time(elapsed_time)
@@ -244,4 +266,4 @@ def run_pipeline(config_path="config.yaml", k=None, chunks=None, chunk_dir=None)
     log_to_file(f"Chunks: {n}, k: {k}", log_file)
     log_to_file(f"Total time taken: {h}h {m}m {s}s", log_file)
 
-    return final_rf, elapsed_time
+    return final_rf, elapsed_time, lowest_dm_star, num_eq_classes, eq_class_stats

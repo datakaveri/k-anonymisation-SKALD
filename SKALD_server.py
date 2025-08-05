@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+import numpy as np
 from flask_cors import CORS
 import requests
 import json
@@ -10,7 +11,16 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from SKALD_main import main_process 
-
+def convert_numpy(obj):
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    elif isinstance(obj, (np.floating,)):
+        return float(obj)
+    elif isinstance(obj, (np.ndarray,)):
+        return obj.tolist()
+    else:
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+    
 app = Flask(__name__)
 CORS(app, origins="*", allow_headers="*")
 server_config = configparser.ConfigParser()
@@ -35,7 +45,8 @@ def process_k_anon_chunk():
 
         os.makedirs("pipelineOutput", exist_ok=True)
         with open("pipelineOutput/SKALD_output.json", "w") as f_out:
-            json.dump(result, f_out, indent=2)
+            #print(type(result))
+            json.dump(result, f_out, indent=2, default=convert_numpy)
         print("SKALD response saved successfully")
 
         return jsonify(result), 200 if result.get("status") == "success" else 500

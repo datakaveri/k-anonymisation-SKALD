@@ -15,3 +15,6 @@ chunkanon/schema.json
 DM*.py
 small_data.zip
 venv/
+pipelineOutput/
+best_nodes.csv
+5K_rows_data/

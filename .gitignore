@@ -17,4 +17,4 @@ small_data.zip
 venv/
 pipelineOutput/
 best_nodes.csv
-5K_rows_data/
+5K_rows_data/__pycache__/

@@ -107,7 +107,7 @@ def main_process(config):
                 arx_ready_config = convert_ui_config_to_arx(config)
                 k_anon_config = arx_ready_config["k_anonymize"]
                 arx_ready_config["k"] = k_anon_config["k"] 
-                url = 'http://localhost:8070/api/arx/process'
+                url = 'http://web:8070/api/arx/process'
                 headers = {'Content-Type': 'application/json'}
                 #fileList = sorted(glob.glob(os.path.join(chunk_directory, "*.csv")))
                 #print(fileList)

@@ -160,14 +160,14 @@ class OLA_1:
             sorted_nodes = sorted(
                 [node for node in self.tree[mid_level] if self.node_status.get(tuple(node)) is None]
             )
-            print(sorted_nodes)
+            #print(sorted_nodes)
             for node in sorted_nodes:
                 if self.node_status.get(tuple(node)) is not None:
                     continue
 
                 classes = self.calculate_equivalence_classes(node)
                 #print(f"No. of Equivalence classes for node : {node}, is {classes}" )
-
+                #print(self.max_equivalence_classes)
                 if classes <= self.max_equivalence_classes:
                     self._mark_subtree_pass(node)
                 else:

@@ -6,3 +6,5 @@ pyyaml
 flask
 flask_cors
 requests
+logging
+psutil

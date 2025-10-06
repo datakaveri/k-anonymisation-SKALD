@@ -91,16 +91,25 @@ class OLA_2:
         self.domains = []
         for qi in self.quasi_identifiers:
             col = qi.column_name
+            # Automatically use encoded column if needed
+            if qi.is_encoded and not col.endswith("_encoded"):
+                col += "_encoded"
+
             if qi.is_categorical:
-                unique_values = dataset[col].unique()
+                unique_values = dataset[col].dropna().unique()
                 self.domains.append(sorted(unique_values.tolist()))
             else:
-                self.domains.append(sorted(dataset[col].unique().tolist()))
+                self.domains.append(sorted(dataset[col].dropna().unique().tolist()))
 
     def get_index_tuple(self, row):
         indices = []
         for i, qi in enumerate(self.quasi_identifiers):
-            val = row[qi.column_name]
+            col = qi.column_name
+            if qi.is_encoded and not col.endswith("_encoded"):
+                col += "_encoded"
+
+            val = row[col]
+
             if qi.is_categorical:
                 try:
                     index = self.domains[i].index(val)
@@ -112,30 +121,58 @@ class OLA_2:
             indices.append(index)
         return tuple(indices)
 
-
-
     def process_chunk(self, chunk, bin_widths):
         if not self.domains:
             self.build_domains(chunk)
 
-        shape = [len(dom) for dom in self.domains]
+        #print(f"Domains: {self.domains}")
+
+        # Build histogram shape: number of bins per QI
+        shape = []
+        for qi, dom, bw in zip(self.quasi_identifiers, self.domains, bin_widths):
+            if qi.is_categorical:
+                shape.append(len(dom))
+            else:
+                col_min, col_max = min(dom), max(dom)
+                n_bins = int(np.ceil((col_max - col_min + 1) / bw))
+                shape.append(n_bins)
+
         histogram = np.zeros(shape, dtype=int)
 
-        # initialize nested sensitive sets
-        def nested_defaultdict():
-            return defaultdict(set)
-
+        # Init sensitive sets array
         self.sensitive_sets = np.empty(shape, dtype=object)
         it = np.nditer(histogram, flags=['multi_index', 'refs_ok'], op_flags=['writeonly'])
-        for idx in it:
+        for _ in it:
             self.sensitive_sets[it.multi_index] = set()
 
+        # Helper: map row → bin indices
+        def get_bin_index(row):
+            indices = []
+            for i, (qi, bw) in enumerate(zip(self.quasi_identifiers, bin_widths)):
+                col = qi.column_name
+                if qi.is_encoded and not col.endswith("_encoded"):
+                    col += "_encoded"
+
+                val = row[col]
+                if qi.is_categorical:
+                    indices.append(self.domains[i].index(val))
+                else:
+                    col_min, col_max = min(self.domains[i]), max(self.domains[i])
+                    idx = int((val - col_min) // bw)
+                    indices.append(idx)
+            return tuple(indices)
+
+        # Fill histogram
         for _, row in chunk.iterrows():
-            idx = self.get_index_tuple(row)
-            histogram[idx] += 1
-            self.sensitive_sets[idx].add(row[self.sensitive_parameter])
+            try:
+                idx = get_bin_index(row)
+                histogram[idx] += 1
+                self.sensitive_sets[idx].add(row[self.sensitive_parameter])
+            except Exception as e:
+                print(f"Skipping row due to error: {e}")
 
         return histogram
+
 
 
     def merge_axis(self, array, axis, group_size):
@@ -169,6 +206,47 @@ class OLA_2:
             merged[tuple(new_idx)] |= array[idx]
 
         return merged
+
+    import itertools
+    
+
+    def print_histogram_classes(self, histogram, bin_widths):
+        """
+        Pretty-print all non-empty equivalence classes in the histogram.
+        Shows count, number of distinct sensitive values, and the sensitive sets.
+        """
+        col_names = [qi.column_name for qi in self.quasi_identifiers]
+        col_mins = []
+        adj_bin_widths = []
+
+        for qi, dom, bw in zip(self.quasi_identifiers, self.domains, bin_widths):
+            if qi.is_categorical:
+                col_mins.append(None)
+                adj_bin_widths.append(None)
+            else:
+                col_mins.append(min(dom))
+                adj_bin_widths.append(bw)
+
+        print("\n=== Equivalence Classes ===")
+        it = np.nditer(histogram, flags=['multi_index'])
+        for x in it:
+            if x > 0:  # non-empty bin
+                idx = it.multi_index
+                class_repr = []
+                for i, (qi, dom, bw, min_val) in enumerate(zip(self.quasi_identifiers, self.domains, adj_bin_widths, col_mins)):
+                    if qi.is_categorical:
+                        val = dom[idx[i]]
+                        class_repr.append(f"{col_names[i]}={val}")
+                    else:
+                        start = min_val + idx[i] * bw
+                        end = start + bw
+                        class_repr.append(f"{col_names[i]}=[{start}, {end})")
+
+                # sensitive info
+                sens_vals = self.sensitive_sets[idx]
+                #print(f"{class_repr} -> count={int(x)}, sensitive_count={len(sens_vals)}")
+
+
 
     def merge_equivalence_classes(self, histogram, sensitive_sets, new_bin_widths):
         merged_hist = histogram.copy()
@@ -226,7 +304,7 @@ class OLA_2:
         sensitive_sets_const = self.sensitive_sets.copy()
         total_nodes = sum(len(level) for level in self.tree)
         pbar = tqdm(total=total_nodes, desc="Marking Nodes", unit="node")
-
+        #print(f"Histogram {histogram_const}")
         while any(v is None for v in self.node_status.values()):
             histogram = histogram_const.copy()
             unmarked_levels = [i for i in range(len(self.tree)) if any(self.node_status.get(tuple(node)) is None for node in self.tree[i])]
@@ -251,14 +329,14 @@ class OLA_2:
                 if self.check_k_anonymity(histogram, k,l):
                     self._mark_subtree_pass(node, pbar)
                     pass_nodes.append(node)
-                elif self.suppression_count < (self.suppression_limit * self.total_records):
+                elif self.suppression_count < (self.suppression_limit * self.total_records / 100):
                     self._mark_subtree_pass(node, pbar)
                     pass_nodes.append(node)
                 else:
                     self._mark_parents_fail(node, pbar)
 
         pbar.close()
-        self.find_best_rf(histogram_const, pass_nodes, k,sensitive_sets_const)
+        self.find_best_rf(histogram_const, pass_nodes, k,l,sensitive_sets_const)
         return self.smallest_passing_rf if self.smallest_passing_rf else list(self.tree[0][0])
 
     def _mark_subtree_pass(self, node, pbar=None):
@@ -295,28 +373,44 @@ class OLA_2:
                         q.append(parent)
                         if pbar: pbar.update(1)
 
-    def find_best_rf(self, histogram, pass_nodes, k, sensitive_sets):
+    def find_best_rf(self, histogram, pass_nodes, k, l, sensitive_sets):
         best_node = None
         lowest_dm_star = float('inf')
-        best_num_eq_classes = None  # ← add this line
+        best_num_eq_classes = None
+        best_supp_count = None
 
-        print("\nPassing nodes and their DM* values:")
+        print("\nPassing nodes and their DM* values (with k-anonymity + l-diversity):")
         for node in pass_nodes:
-            merged_hist, _ = self.merge_equivalence_classes(histogram.copy(), sensitive_sets, list(node))
+            merged_hist, merged_sensitive = self.merge_equivalence_classes(
+                histogram.copy(), sensitive_sets, list(node)
+            )
+
             low_count_sum = np.sum(merged_hist[merged_hist < k])
             dm_star = np.sum(merged_hist[merged_hist >= k] ** 2) + low_count_sum ** 2
-            num_eq_classes = np.sum(merged_hist > 0)  # ← count equivalence classes
-            supp_percent = self.get_suppressed_percent(node, histogram, k)
-            #print(f"Node: {list(node)}, DM*: {dm_star}, EQ Classes: {num_eq_classes}, Suppressed: {supp_percent:.2f}%")
+            num_eq_classes = np.sum(merged_hist > k)
+            #print(merged_hist)
 
+            self.sensitive_sets = merged_sensitive
+            supp_count = self.suppression_count
+
+            #print(f"Node: {list(node)}, DM*: {dm_star}, EQ Classes: {num_eq_classes},Suppressed Records: {supp_count}")
+            
+            eq_class_indices = np.argwhere(merged_hist > 0)
+            #print("  Equivalence Classes (index → count):")
+            for idx in eq_class_indices:
+                count = merged_hist[tuple(idx)]
+                #print(f"    {tuple(idx)} -> {count}")
             if dm_star <= lowest_dm_star:
                 lowest_dm_star = dm_star
                 best_node = node
-                best_num_eq_classes = num_eq_classes  # ← store the best one
+                best_num_eq_classes = num_eq_classes
+                best_supp_count = supp_count
 
         self.smallest_passing_rf = best_node
-        self.lowest_dm_star = lowest_dm_star       # ← save as instance variable
-        self.best_num_eq_classes = best_num_eq_classes  # ← save as instance variable
+        self.lowest_dm_star = lowest_dm_star
+        self.best_num_eq_classes = best_num_eq_classes
+        self.best_suppression_count = best_supp_count
+
 
         if best_node is not None:
             print(f"\nBest Node: {list(best_node)}, Final DM*: {lowest_dm_star}")
@@ -367,20 +461,50 @@ class OLA_2:
                 gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
 
             else:
+                col_temp = col.removesuffix("_encoded")
                 col_data = gen_chunk[col]
-                encoding_file = os.path.join("encodings", f"{col.replace(' ', '_').lower()}_encoding.json")
-
+                encoding_file = os.path.join("encodings", f"{col_temp.replace(' ', '_').lower()}_encoding.json")
+                print(f"Using encoding file: {encoding_file}")
                 if os.path.exists(encoding_file):
+                    
                     with open(encoding_file, "r") as f:
-                        decoding_map = json.load(f)
+                        raw_map = json.load(f)
 
-                    bin_edges = np.arange(col_data.min(), col_data.max() + bw + 1, bw)
-                    labels = [
-                        f"[{decoding_map.get(int(bin_edges[i]), bin_edges[i])}-{decoding_map.get(int(bin_edges[i+1]-1), bin_edges[i+1]-1)}]"
-                        for i in range(len(bin_edges) - 1)
-                    ]
+                    encoding_map = raw_map["encoding_map"]
+                    decoding_map = {v: int(k) for k, v in encoding_map.items()}
+                    multiplier = raw_map.get("multiplier", 1)
+                    #print(f"Decoding map: {list(decoding_map.items())[:10]}") 
 
-                    gen_chunk[col] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True,right=False)
+                    min_val = col_data.min()
+                    max_val = col_data.max()
+                    print(f"Min value in {col}: {min_val}")
+                    print(f"Max value in {col}: {max_val}")
+                    print(f"Bin width for {col}: {bw}")
+                    bin_edges = list(range(min_val, max_val, int(bw)))
+                    if bin_edges[-1] < max_val + 1:
+                        bin_edges.append(max_val + 1)
+                    bin_edges = np.array(bin_edges)
+
+                    #print(f"Bin edges for {col}: {bin_edges}")
+                    labels = []
+                    for i in range(len(bin_edges) - 1):
+                        start_enc = int(bin_edges[i])
+                        end_enc   = int(bin_edges[i+1] - 1)
+
+                        if i == len(bin_edges) - 2:  # last bin
+                            end_enc = int(max_val)
+
+                        if multiplier != 1:
+                            start_dec = decoding_map.get(start_enc, start_enc) / multiplier
+                            end_dec   = decoding_map.get(end_enc, end_enc) / multiplier
+                        else:
+                            start_dec = decoding_map.get(start_enc, start_enc)
+                            end_dec   = decoding_map.get(end_enc, end_enc)
+
+                        labels.append(f"[{start_dec}-{end_dec}]")
+
+                    #print(labels)
+                    gen_chunk[col_temp] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True,right=False)
 
                 else:
                     min_edge = (col_data.min() // bw) * bw

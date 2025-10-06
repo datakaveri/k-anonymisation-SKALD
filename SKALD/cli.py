@@ -3,10 +3,10 @@ from SKALD.core import run_pipeline
 
 def main():
     parser = argparse.ArgumentParser(description="Run SKALD.")
-    parser.add_argument('--config', type=str, default='config.yaml', help='Path to YAML config file')
+    parser.add_argument('--config', type=str, default=None, help='Path to YAML config file')
     parser.add_argument('--k', type=int, default=None, help='Override k from config')
     parser.add_argument('--chunks', type=int, default=None, help='Override number of chunks from config')
-    parser.add_argument('--chunk_dir', type=str, default='small_data', help='Override chunk directory from config')
+    parser.add_argument('--chunk_dir', type=str, default=None, help='Override chunk directory from config')
     
     args = parser.parse_args()
 

@@ -1,70 +1,20 @@
 import os
 import json
+import psutil
+import time
 from datetime import datetime
 
 
 from tqdm import tqdm
 
 
-def log(message: str):
-    """
-    Log a message with a timestamp.
-    """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{timestamp}] [LOG] {message}")
+def log_performance(logger,step_name: str, start_time: float):
+    """Logs elapsed time and memory usage for a step."""
+    process = psutil.Process(os.getpid())
+    mem_mb = process.memory_info().rss / (1024 * 1024)
 
-def log_to_file(message, filepath="log.txt"):
-    """
-    Append a log message to a file with a timestamp.
-
-    Args:
-        message (str): Message to write.
-        filepath (str): File path to append to.
-    """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(filepath, "a") as f:
-        f.write(f"[{timestamp}] {message}\n")
-
-
-def ensure_folder(path: str):
-    """
-    Ensure a directory exists, creating it if needed.
-
-    Args:
-        path (str): Path to the folder.
-    """
-    if not os.path.exists(path):
-        os.makedirs(path)
-        log(f"Created folder: {path}")
-    else:
-        log(f"Folder already exists: {path}")
-
-
-def save_dict_to_json(data: dict, filepath: str):
-    """
-    Save a Python dictionary to a JSON file.
-
-    Args:
-        data (dict): Dictionary to save.
-        filepath (str): Destination JSON file path.
-    """
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=4)
-    log(f"Dictionary saved to {filepath}")
-
-
-def get_progress_iter(iterable, desc="Processing"):
-    """
-    Wrap an iterable with tqdm progress bar.
-
-    Args:
-        iterable (iterable): The iterable to wrap.
-        desc (str): Description for the progress bar.
-
-    Returns:
-        generator: tqdm-wrapped iterator.
-    """
-    return tqdm(iterable, desc=desc)
+    elapsed = time.time() - start_time
+    logger.info(f"[{step_name}] Time taken: {elapsed:.2f} sec | Memory: {mem_mb:.2f} MB")
 
 
 def format_time(seconds):
@@ -81,3 +31,7 @@ def format_time(seconds):
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
     return hours, minutes, secs
+
+def find_max_decimal_places(series):
+    decimals = series.dropna().map(lambda x: len(str(x).split(".")[1]) if "." in str(x) else 0)
+    return decimals.max()

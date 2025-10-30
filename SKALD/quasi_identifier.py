@@ -32,24 +32,6 @@ class QuasiIdentifier:
             self.min_value = float(min_value) if min_value is not None else None
             self.max_value = float(max_value) if max_value is not None else None
 
-    def update_min_max(self, chunk):
-        """
-        Update min and max for numerical attributes based on a new data chunk.
-
-        Args:
-            chunk (pd.DataFrame): The chunk to extract min/max from.
-        """
-        if self.is_categorical:
-            return  # No action needed for categorical attributes
-
-        column = chunk[self.column_name]
-        chunk_min = column.min(skipna=True)
-        chunk_max = column.max(skipna=True)
-
-        if chunk_min is not None:
-            self.min_value = min(self.min_value, float(chunk_min)) if self.min_value is not None else float(chunk_min)
-        if chunk_max is not None:
-            self.max_value = max(self.max_value, float(chunk_max)) if self.max_value is not None else float(chunk_max)
 
     def get_range(self):
         """

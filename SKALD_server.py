@@ -6,6 +6,7 @@ import json
 import configparser
 import os
 import sys
+import yaml
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,18 +37,23 @@ def test_server():
 @app.route("/process_SKALD", methods=["POST"])
 def process_k_anon_chunk():
     try:
-        config = request.get_json(force=True)
-        if not config:
-            raise ValueError("Empty or invalid JSON received")
+        content_type = request.headers.get('Content-Type')
+        raw_data = request.data.decode('utf-8')
 
- 
+        # Detect input type
+        if 'yaml' in content_type or raw_data.strip().startswith(('-', 'dataset_path:')):
+            config = yaml.safe_load(raw_data)
+        else:
+            config = request.get_json(force=True)
+
+        if not config:
+            raise ValueError("Empty or invalid config received")
+
         result = main_process(config)
 
         os.makedirs("pipelineOutput", exist_ok=True)
         with open("pipelineOutput/SKALD_output.json", "w") as f_out:
-            #print(type(result))
             json.dump(result, f_out, indent=2, default=convert_numpy)
-        print("SKALD response saved successfully")
 
         return jsonify(result), 200 if result.get("status") == "success" else 500
 

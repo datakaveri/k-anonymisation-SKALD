@@ -2,8 +2,7 @@ import os
 import pandas as pd
 from SKALD.preprocess import suppress, pseudonymize
 
-def process_chunks_for_histograms(chunk_files, chunk_dir, numerical_columns_info, encoding_maps,
-                                  suppressed_columns, pseudonymized_columns, ola_2,initial_ri):
+def process_chunks_for_histograms(chunk_files, chunk_dir, numerical_columns_info, encoding_maps,ola_2,initial_ri):
     """
     Process each chunk: apply suppression/pseudonymization, encode numerical columns,
     and generate chunk histograms using OLA_2.
@@ -14,13 +13,6 @@ def process_chunks_for_histograms(chunk_files, chunk_dir, numerical_columns_info
     for i, filename in enumerate(chunk_files):
         chunk = pd.read_csv(os.path.join(chunk_dir, filename))
         working_chunk = chunk.copy()
-
-        if suppressed_columns:
-            working_chunk = suppress(working_chunk, suppressed_columns)
-        if pseudonymized_columns:
-            working_chunk = pseudonymize(working_chunk, pseudonymized_columns)
-
-        # Add encoded columns
         for info in numerical_columns_info:
             column = info["column"]
             encode = info.get("encode", False)

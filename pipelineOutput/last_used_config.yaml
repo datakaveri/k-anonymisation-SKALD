@@ -1,21 +1,11 @@
+enable_k_anonymity: false
 number_of_chunks: 1
-k: 10
-l: 2
-max_number_of_eq_classes: 62500
-suppression_limit: 1
-chunk_directory: 5K_rows_data
+chunk_name: BeneficiaryData.csv
 output_path: generalized_chunk1.csv
+output_directory: pipelineOutput
+key_directory: keys
 log_file: log.txt
 save_output: true
-suppress: [Date of Birth, Address]
-pseudonymize: [Name, Patient ID]
-quasi_identifiers:
-  numerical: [{column: Age, encode: false, type: int}]
-  categorical: [{column: Blood Group}]
-sensitive_parameter: Health Condition
-bin_width_multiplication_factor:
-  Age: 2
-hardcoded_min_max:
-  Age: [19, 85]
-  BMI: [12.7, 35.8]
-  PIN Code: [560001, 591346]
+suppress: [FULLNAMEENGLISH, HEAD_MEMBERNAME]
+pseudonymize: []
+encrypt: [MEMEBERSLNO, URN, MEMBERID, UIDREFERENCENUMBER, HEAD_MEMBERID]

@@ -52,7 +52,7 @@ pip install -e .
 Run SKALD from the command line:
 
 ```bash
-chunkanon --config config.yaml [--k 10] [--chunks 5] [--chunk_dir chunks]
+SKALD --config config.yaml [--k 10] [--chunks 5] [--chunk_dir chunks]
 ```
 
 ### CLI Arguments
@@ -114,7 +114,7 @@ hardcoded_min_max:
 3. Run SKALD:
 
 ```bash
-chunkanon --config config.yaml
+SKALD --config config.yaml
 ```
 
 ### Output
@@ -130,7 +130,7 @@ chunkanon --config config.yaml
 
 ```
 k-anonymisation-SKALD/
-├── chunkanon/
+├── SKALD/
 │   ├── core.py
 │   ├── generalization_ri.py
 │   ├── generalization_rf.py

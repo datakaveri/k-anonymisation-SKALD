@@ -73,44 +73,81 @@ class QuasiIdentifiers(BaseModel):
         """Ensure that at least one numerical QID is provided."""
         if not values.numerical:
             raise ValueError("There must be at least one numerical quasi-identifier")
-        return values
+        return valuesimport pandas as pd
+import psutil
+import os
+
+def split_csv_by_ram(input_csv, output_dir):
+    """
+    Splits a large CSV file into chunks based on 1/4th of total system RAM.
+
+    Args:
+        input_csv (str): Path to the input CSV file.
+        output_dir (str): Directory where output chunks will be saved.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+
+    # --- Step 1. Detect total RAM ---
+    total_ram_bytes = psutil.virtual_memory().total
+    chunk_ram_bytes = total_ram_bytes // 4  # use one-fourth of RAM
+    chunk_ram_gb = chunk_ram_bytes / (1024 ** 3)
+
+    print(f"Total RAM detected: {total_ram_bytes / (1024 ** 3):.2f} GB")
+    print(f"Using ~{chunk_ram_gb:.2f} GB per chunk")
+
+    # --- Step 2. Estimate rows per chunk from sample ---
+    sample = pd.read_csv(input_csv, nrows=10000)
+    avg_row_size = sample.memory_usage(index=True, deep=True).sum() / len(sample)
+    rows_per_chunk = int(chunk_ram_bytes / avg_row_size)
+
+    print(f"≈ {rows_per_chunk:,} rows per chunk (~{chunk_ram_gb:.2f} GB)")
+
+    # --- Step 3. Stream the dataset and write chunks ---
+    reader = pd.read_csv(input_csv, chunksize=rows_per_chunk)
+    for i, chunk in enumerate(reader, start=1):
+        out_path = os.path.join(output_dir, f"chunk_{i}.csv")
+        chunk.to_csv(out_path, index=False)
+        print(f"✅ Wrote {out_path} ({len(chunk):,} rows)")
+
+    print("🎉 Done splitting CSV into chunks.")
+
+# Example usage
+# split_csv_by_ram("large_dataset.csv", "datachunks")
+
     '''
 
 class Config(BaseModel):
-    """
-    Root configuration model for the chunkanon pipeline.
-
-    Attributes:
-        number_of_chunks (int): Number of data chunks to create.
-        k (int): Value for k-anonymity.
-        max_number_of_eq_classes (int): Maximum number of equivalence classes allowed.
-        suppression_limit (Decimal): Suppression threshold (0 ≤ value ≤ 1).
-
-        chunk_directory (str): Directory containing chunked input files.
-        output_path (str): Path to save final output file.
-        log_file (str): Path to the log file.
-        save_output (bool): Whether to write output to file.
-
-        quasi_identifiers (QuasiIdentifiers): Configuration for QIDs.
-        bin_width_multiplication_factor (Dict[str, int]): Bin width scaling factors per QID.
-        hardcoded_min_max (Optional[Dict[str, List[Decimal]]]): Manually specified min/max values per QID.
-    """
-
-    number_of_chunks: int
-    k: int
-    l: int
-    suppression_limit: condecimal(ge=0, le=1)
+    k: Optional[int] = None
+    l: Optional[int] = None
+    suppression_limit: Optional[condecimal(ge=0, le=1)] = 0
     suppress: List[str] = Field(default_factory=list)
     pseudonymize: List[str] = Field(default_factory=list)
-    chunk_directory: str
-    output_path: str
-    log_file: str
-    save_output: bool
+    encrypt: List[str] = Field(default_factory=list)  # <-- NEW
+    enable_k_anonymity: bool = True  # <-- NEW
 
-    quasi_identifiers: QuasiIdentifiers
-    sensitive_parameter:str
-    bin_width_multiplication_factor: Dict[str, int]
+    output_path: str
+    output_directory: str
+    key_directory: str
+    log_file: str
+
+
+    quasi_identifiers: Optional[QuasiIdentifiers] = None
+    sensitive_parameter: Optional[str] = None
+    bin_width_multiplication_factor: Optional[Dict[str, int]] = {}
     hardcoded_min_max: Optional[Dict[str, List[condecimal(ge=0)]]] = {}
+
+    @model_validator(mode="after")
+    def check_k_fields(cls, values):
+        """Skip k/l/QI validation if k-anonymity is disabled."""
+        if not values.enable_k_anonymity:
+            return values
+
+        required = ["k", "l", "quasi_identifiers"]
+        for r in required:
+            if getattr(values, "k", None) is None:
+                raise ValueError(f"'{r}' must be provided when k-anonymity is enabled.")
+        return values
+
 
     @field_validator("bin_width_multiplication_factor")
     @classmethod
@@ -123,7 +160,7 @@ class Config(BaseModel):
             if factor <= 1:
                 raise ValueError(f"Multiplication factor for '{column}' must be greater than 1, but found {factor}")
         return v
-
+'''
     @model_validator(mode="after")
     def check_paths(cls, values):
         """
@@ -143,7 +180,7 @@ class Config(BaseModel):
             raise ValueError(f"Log directory does not exist: {log_dir}")
 
         return values
-
+'''
 
 def load_config(config_path: str):
     """

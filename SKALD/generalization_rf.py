@@ -50,7 +50,7 @@ class OLA_2:
                     if qi.is_categorical:
                         if qi.column_name == "Blood Group":
                             max_level = 3
-                        elif qi.column_name == "Gender":
+                        elif qi.column_name.lower() == "gender":
                             max_level = 2
                         else:
                             max_level = 4
@@ -271,7 +271,7 @@ class OLA_2:
     def _get_max_categorical_level(self, qi):
         if qi.column_name == "Blood Group":
             return 3
-        elif qi.column_name == "Gender":
+        elif qi.column_name.lower() == "gender":
             return 2
         else:
             return 4  # default

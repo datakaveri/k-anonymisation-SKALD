@@ -6,5 +6,7 @@ pyyaml
 flask
 flask_cors
 requests
-logging
 psutil
+cryptography
+pytest
+pytest-cov  

@@ -4,7 +4,7 @@ import json
 from SKALD.preprocess import suppress, pseudonymize
 from SKALD.utils import find_max_decimal_places
 
-def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info, suppressed_columns=None, pseudonymized_columns=None):
+def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
     """
     Encode numerical columns across all chunks consistently.
     
@@ -25,11 +25,6 @@ def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info, sup
         # Collect all values from all chunks
         for filename in chunk_files:
             chunk = pd.read_csv(os.path.join(chunk_dir, filename))
-            if suppressed_columns:
-                chunk = suppress(chunk, suppressed_columns)
-            if pseudonymized_columns:
-                chunk = pseudonymize(chunk, pseudonymized_columns)
-
             values = chunk[column].dropna()
             if column_type == "float":
                 decimal_places = find_max_decimal_places(values)

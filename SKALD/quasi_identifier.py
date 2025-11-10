@@ -45,5 +45,5 @@ class QuasiIdentifier:
 
         if self.min_value is None or self.max_value is None:
             return 0.0  
-
+        
         return float(self.max_value - self.min_value + 1)

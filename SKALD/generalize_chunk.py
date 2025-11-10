@@ -1,21 +1,16 @@
 import pandas as pd
+import os
 from SKALD.preprocess import suppress, pseudonymize
 
-def generalize_first_chunk(chunk_file, output_path, numerical_columns_info,
-                           suppressed_columns, pseudonymized_columns, encoding_maps, ola_2):
+def generalize_first_chunk(chunk_file, output_path, numerical_columns_info, encoding_maps, ola_2,final_rf):
     """
     Generalize the first chunk using final RF bin widths and save to CSV.
     """
     print("\nGeneralizing first chunk based on RF...")
-    chunk = pd.read_csv(chunk_file)
+    chunk = os.path.join("chunks",chunk_file)
+    chunk = pd.read_csv(chunk)
     working_chunk = chunk.copy()
 
-    if suppressed_columns:
-        working_chunk = suppress(working_chunk, suppressed_columns)
-    if pseudonymized_columns:
-        working_chunk = pseudonymize(working_chunk, pseudonymized_columns)
-
-    # Add encoded columns
     for info in numerical_columns_info:
         column = info["column"]
         encode = info.get("encode", False)
@@ -27,7 +22,7 @@ def generalize_first_chunk(chunk_file, output_path, numerical_columns_info,
             else:
                 working_chunk[f"{column}_encoded"] = working_chunk[column].map(enc_map)
 
-    generalized_chunk = ola_2.generalize_chunk(working_chunk, ola_2.final_binwidths)
+    generalized_chunk = ola_2.generalize_chunk(working_chunk,final_rf)
 
     # Remove encoded columns
     for info in numerical_columns_info:

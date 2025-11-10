@@ -23,10 +23,12 @@ def build_quasi_identifiers(numerical_columns_info, categorical_columns, encodin
 
         encoded_column = f"{column}_encoded" if encode else column
         all_quasi_columns.append(encoded_column)
-
+        #print("Processing numerical QI:", column, "Encode:", encode)
+ 
         if encode:
             min_val, max_val = 1, len(encoding_maps[column]["encoding_map"])
         else:
+            #print("hardcoded_min_max:", hardcoded_min_max)
             min_val, max_val = hardcoded_min_max.get(column, (0, 0))
 
         quasi_identifiers.append(

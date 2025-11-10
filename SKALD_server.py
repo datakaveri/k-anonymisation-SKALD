@@ -8,27 +8,23 @@ import os
 import sys
 import yaml
 
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from SKALD_main import main_process 
-def convert_numpy(obj):
-    if isinstance(obj, (np.integer,)):
-        return int(obj)
-    elif isinstance(obj, (np.floating,)):
-        return float(obj)
-    elif isinstance(obj, (np.ndarray,)):
-        return obj.tolist()
-    else:
-        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
     
 app = Flask(__name__)
-CORS(app, origins="*", allow_headers="*")
 server_config = configparser.ConfigParser()
 server_config.read('server_config.cfg')
 
 main_server_ip = server_config.get('SKALD_SERVER', 'ip')
 main_server_port = server_config.get('SKALD_SERVER', 'port')
+
+def send_response(response):
+    with open('pipelineOutput/test_output.json','w') as f:
+        json.dump(response, f) 
+    print('response saved successfully')
+
+
+    return response
 
 @app.route("/test_SKALD", methods=["GET"])
 def test_server():
@@ -37,25 +33,10 @@ def test_server():
 @app.route("/process_SKALD", methods=["POST"])
 def process_k_anon_chunk():
     try:
-        content_type = request.headers.get('Content-Type')
-        raw_data = request.data.decode('utf-8')
-
-        # Detect input type
-        if 'yaml' in content_type or raw_data.strip().startswith(('-', 'dataset_path:')):
-            config = yaml.safe_load(raw_data)
-        else:
-            config = request.get_json(force=True)
-
-        if not config:
-            raise ValueError("Empty or invalid config received")
-
-        result = main_process(config)
-
-        os.makedirs("pipelineOutput", exist_ok=True)
-        with open("pipelineOutput/SKALD_output.json", "w") as f_out:
-            json.dump(result, f_out, indent=2, default=convert_numpy)
-
-        return jsonify(result), 200 if result.get("status") == "success" else 500
+        config = json.loads(request.get_data().decode())
+        data = main_process(config)
+        response = json.loads(data)
+        response = send_response(response)
 
     except Exception as e:
         response = {
@@ -87,5 +68,5 @@ def get_dataset_names():
 
 
 if __name__ == "__main__":
-    #app.run(host=main_server_ip, port=int(main_server_port), debug=True)
-    app.run(host='0.0.0.0',debug=True,port = 8071)
+    app.run(host=main_server_ip, port=int(main_server_port), debug=True)
+    #app.run(debug=True)

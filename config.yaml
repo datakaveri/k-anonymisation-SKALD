@@ -1,36 +1,17 @@
 # config.yaml
-
+enable_k_anonymity: false
 number_of_chunks: 1
-k: 50
-l: 6
 
-max_number_of_eq_classes: 62500
-suppression_limit: 0.0005
-
-chunk_directory: small_data
+chunk_directory: 5K_rows_data
 output_path: generalized_chunk1.csv
+output_directory: output_chunks
+key_directory: keys
 log_file: log.txt
 save_output: true
 
-quasi_identifiers:
-  numerical:
-    - column: Age
-      encode: false
-      type: int
-
-  categorical: 
-    - column : Blood Group
-    - column : Gender
-
-sensitive_parameter : Health Condition
-bin_width_multiplication_factor:
-  Age: 2
-  PIN Code: 2
-  BMI: 2
-
-hardcoded_min_max:
-  Age: [19, 85]
-  PIN Code : [560001, 572010]
-  BMI : [14.4, 33.0]
+suppress : 
+  - Date of Birth 
+encrypt :
+  - Patient ID
 
 

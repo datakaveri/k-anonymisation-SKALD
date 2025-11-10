@@ -18,7 +18,7 @@ class CategoricalGeneralizer:
                     "AB+": "*", "AB-": "*", "O+": "*", "O-": "*"
                 }
             },
-            "Gender": {
+            "GENDER": {
                 1: {  # Level 0: No generalization
                     "Male": "Male", "Female" :"Female"
                 },
@@ -129,4 +129,4 @@ class CategoricalGeneralizer:
         Returns:
             str: The generalized blood group value.
         """
-        return self.generalize("Gender", value, level)
+        return self.generalize("GENDER", value, level)

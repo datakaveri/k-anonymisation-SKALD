@@ -45,7 +45,7 @@ class OLA_1:
                     num_classes *= [8, 4, 1][int(bin_width)-1]
                 elif qi.column_name == 'Profession':
                     num_classes *= [16, 4, 2, 1][int(bin_width)-1]
-                elif qi.column_name == 'Gender':
+                elif qi.column_name.lower() == 'gender':
                     num_classes *= [2, 1][int(bin_width)-1]
             else:
                 # For numeric QIs, use range/bin_width (unless bin_width is 0)
@@ -76,7 +76,7 @@ class OLA_1:
                         # Max hierarchy levels for categorical QIs
                         if qi.column_name == "Blood Group":
                             max_level = 3
-                        elif qi.column_name == "Gender":
+                        elif qi.column_name.lower() == "gender":
                             max_level = 2
                         else:
                             max_level = 4
@@ -122,7 +122,7 @@ class OLA_1:
             if qi.is_categorical:
                 if qi.column_name == "Blood Group":
                     max_level = 3
-                elif qi.column_name == "Gender":
+                elif qi.column_name.lower() == "gender":
                     max_level = 2
                 else:
                     max_level = 4
@@ -164,7 +164,7 @@ class OLA_1:
             for node in sorted_nodes:
                 if self.node_status.get(tuple(node)) is not None:
                     continue
-
+                #Print(node)
                 classes = self.calculate_equivalence_classes(node)
                 #print(f"No. of Equivalence classes for node : {node}, is {classes}" )
                 #print(self.max_equivalence_classes)

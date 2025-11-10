@@ -1,12 +1,17 @@
 README.md
 setup.py
 SKALD/__init__.py
+SKALD/build_QI.py
 SKALD/categorical.py
+SKALD/chunk_processinng.py
 SKALD/cli.py
 SKALD/config_validation.py
 SKALD/core.py
+SKALD/encoder.py
 SKALD/generalization_rf.py
 SKALD/generalization_ri.py
+SKALD/generalize_chunk.py
+SKALD/preprocess.py
 SKALD/quasi_identifier.py
 SKALD/utils.py
 SKALD.egg-info/PKG-INFO

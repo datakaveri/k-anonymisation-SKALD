@@ -280,7 +280,7 @@ class OLA_1:
             node for level in self.tree
             for node in level if self.node_status.get(tuple(node)) == "pass"
         ]
-
+    '''
     def print_tree_status(self):
         """
         Prints the structure of the tree and status (pass/fail) of each node.
@@ -292,3 +292,4 @@ class OLA_1:
                 status = self.node_status.get(tuple(node), "Unknown")
                 print(f"  Node: {node} -> Status: {status}")
         print("=== End Tree ===\n")
+    '''

@@ -5,30 +5,26 @@ class CategoricalGeneralizer:
         """
         self.hierarchies = {
             "Blood Group": {
-                1: {  # Level 0: No generalization
+                1: {
                     "A+": "A+", "A-": "A-", "B+": "B+", "B-": "B-",
                     "AB+": "AB+", "AB-": "AB-", "O+": "O+", "O-": "O-"
                 },
-                2: {  # Level 1: Group by blood type
+                2: {
                     "A+": "A", "A-": "A", "B+": "B", "B-": "B",
                     "AB+": "AB", "AB-": "AB", "O+": "O", "O-": "O"
                 },
-                3: {  # Level 2: Fully generalized
+                3: {
                     "A+": "*", "A-": "*", "B+": "*", "B-": "*",
                     "AB+": "*", "AB-": "*", "O+": "*", "O-": "*"
                 }
             },
             "GENDER": {
-                1: {  # Level 0: No generalization
-                    "Male": "Male", "Female" :"Female"
-                },
-                2: {  # Level 1: Fully generalized
-                    "Male": "*", "Female" :"*"
-                }
+                1: {"Male": "Male", "Female": "Female"},
+                2: {"Male": "*", "Female": "*"}
             },
             "Profession": {
-                1: lambda x: x,  # Level 0: No generalization
-                2: {  # Level 1: Profession → Subcategory
+                1: lambda x: x,
+                2: {
                     "Medical Specialists": "Healthcare",
                     "Allied Health": "Healthcare",
                     "Nursing": "Healthcare",
@@ -46,7 +42,7 @@ class CategoricalGeneralizer:
                     "Data & Analytics": "Engineering",
                     "AI & Machine Learning": "Engineering"
                 },
-                3: {  # Level 2: Subcategory → Broad Category
+                3: {
                     "Medical Specialists": "Service Sector",
                     "Allied Health": "Service Sector",
                     "Nursing": "Service Sector",
@@ -64,69 +60,75 @@ class CategoricalGeneralizer:
                     "Data & Analytics": "Non-Service",
                     "AI & Machine Learning": "Non-Service"
                 },
-                4: lambda x: "*"  # Level 3: Fully generalized
+                4: lambda x: "*"
             }
         }
 
+    # ----------------------------------------------------
+    # Core generalization logic with robust error handling
+    # ----------------------------------------------------
     def generalize(self, column_name, value, level):
         """
-        Generalizes a categorical value based on the specified column and hierarchy level.
+        Generalizes a categorical value with full safety checks.
 
         Args:
-            column_name (str): The name of the column (e.g., "Blood Group" or "Profession").
-            value (str): The categorical value to generalize.
-            level (int): The generalization level.
+            column_name (str)
+            value (str or None)
+            level (int)
 
         Returns:
-            str: The generalized value.
+            str: generalized value or safe fallback.
         """
+
+        # Protect against None values
+        if value is None:
+            return "Unknown"
+
+        # Ensure string
+        try:
+            value = str(value)
+        except Exception:
+            return "Invalid"
+
+        # Missing column hierarchy → return original value
         if column_name not in self.hierarchies:
-            return value  # Return original value if column is not defined in hierarchies
+            return value  
 
         hierarchy = self.hierarchies[column_name]
 
-        if isinstance(hierarchy.get(level), dict):  # Use dictionary-based hierarchy
-            return hierarchy[level].get(value, "Other")  # Fallback to "Other" for unknown values
-        elif callable(hierarchy.get(level)):  # Use function-based hierarchy
-            return hierarchy[level](value)
-        else:
-            return value  # Return original value if no hierarchy is defined for the level
+        # Invalid level
+        if level not in hierarchy:
+            # fallback to closest available level OR return original
+            safe_level = max([lvl for lvl in hierarchy.keys() if isinstance(lvl, int)], default=None)
+            if safe_level:
+                level = safe_level
+            else:
+                return value
 
+        mapping_or_func = hierarchy.get(level)
+
+        # Dictionary mapping
+        if isinstance(mapping_or_func, dict):
+            return mapping_or_func.get(value, "Other")
+
+        # Functional mapping
+        if callable(mapping_or_func):
+            try:
+                return mapping_or_func(value)
+            except Exception:
+                return "Other"
+
+        # Unexpected structure
+        return value
+
+    # ----------------------------------------------------
+    # Convenience wrappers
+    # ----------------------------------------------------
     def generalize_blood_group(self, value, level):
-        """
-        Wrapper for generalizing blood group values.
-
-        Args:
-            value (str): The blood group value.
-            level (int): The generalization level.
-
-        Returns:
-            str: The generalized blood group value.
-        """
         return self.generalize("Blood Group", value, level)
 
     def generalize_profession(self, value, level):
-        """
-        Wrapper for generalizing profession values.
-
-        Args:
-            value (str): The profession value.
-            level (int): The generalization level.
-
-        Returns:
-            str: The generalized profession value.
-        """
         return self.generalize("Profession", value, level)
-    
+
     def generalize_gender(self, value, level):
-        """
-        Wrapper for generalizing blood group values.
-
-        Args:
-            value (str): The blood group value.
-            level (int): The generalization level.
-
-        Returns:
-            str: The generalized blood group value.
-        """
         return self.generalize("GENDER", value, level)

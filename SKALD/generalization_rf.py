@@ -2,11 +2,13 @@ import math
 import json
 import os
 import pandas as pd
+import itertools
 import numpy as np
 from tqdm import tqdm
 
 from collections import defaultdict
 from SKALD.categorical import CategoricalGeneralizer
+from SKALD.encoder import get_encoding_dir
 
 
 class OLA_2:
@@ -125,27 +127,27 @@ class OLA_2:
         if not self.domains:
             self.build_domains(chunk)
 
-        #print(f"Domains: {self.domains}")
-
         # Build histogram shape: number of bins per QI
         shape = []
+        num_bin_info = []  # keep (col_min,col_max,n_bins) for numerics so we can clamp
         for qi, dom, bw in zip(self.quasi_identifiers, self.domains, bin_widths):
             if qi.is_categorical:
                 shape.append(len(dom))
+                num_bin_info.append(None)
             else:
                 col_min, col_max = min(dom), max(dom)
-                n_bins = int(np.ceil((col_max - col_min + 1) / bw))
+                n_bins = int(np.ceil(max(1, (col_max - col_min + 1)) / max(1, int(bw))))
                 shape.append(n_bins)
+                num_bin_info.append((col_min, col_max, n_bins))
 
         histogram = np.zeros(shape, dtype=int)
 
-        # Init sensitive sets array
+        # Init sensitive sets array aligned with histogram
         self.sensitive_sets = np.empty(shape, dtype=object)
         it = np.nditer(histogram, flags=['multi_index', 'refs_ok'], op_flags=['writeonly'])
         for _ in it:
             self.sensitive_sets[it.multi_index] = set()
 
-        # Helper: map row → bin indices
         def get_bin_index(row):
             indices = []
             for i, (qi, bw) in enumerate(zip(self.quasi_identifiers, bin_widths)):
@@ -157,19 +159,26 @@ class OLA_2:
                 if qi.is_categorical:
                     indices.append(self.domains[i].index(val))
                 else:
-                    col_min, col_max = min(self.domains[i]), max(self.domains[i])
-                    idx = int((val - col_min) // bw)
+                    col_min, col_max, n_bins = num_bin_info[i]
+                    bw = max(1, int(bw))
+                    idx = int(np.floor((val - col_min) / bw))
+                    # clamp
+                    if idx < 0:
+                        idx = 0
+                    if idx >= n_bins:
+                        idx = n_bins - 1
                     indices.append(idx)
             return tuple(indices)
 
-        # Fill histogram
         for _, row in chunk.iterrows():
             try:
                 idx = get_bin_index(row)
                 histogram[idx] += 1
                 self.sensitive_sets[idx].add(row[self.sensitive_parameter])
             except Exception as e:
-                print(f"Skipping row due to error: {e}")
+                # keep going for robustness
+                # print(f"Skipping row due to error: {e}")
+                continue
 
         return histogram
 
@@ -207,9 +216,9 @@ class OLA_2:
 
         return merged
 
-    import itertools
     
-
+    
+    '''
     def print_histogram_classes(self, histogram, bin_widths):
         """
         Pretty-print all non-empty equivalence classes in the histogram.
@@ -246,7 +255,7 @@ class OLA_2:
                 sens_vals = self.sensitive_sets[idx]
                 #print(f"{class_repr} -> count={int(x)}, sensitive_count={len(sens_vals)}")
 
-
+    '''
 
     def merge_equivalence_classes(self, histogram, sensitive_sets, new_bin_widths):
         merged_hist = histogram.copy()
@@ -256,15 +265,19 @@ class OLA_2:
             if not qi.is_categorical:
                 group_size = max(1, int(level))
             else:
-                domain_size = len(self.domains[i])
+                # if domains are not built, fallback to axis length
+                axis_len = merged_hist.shape[i]
                 max_level = self._get_max_categorical_level(qi)
-                group_size = max(1, int(domain_size // (max_level - level + 1)))
+                # spread categories across levels; avoid div-by-zero
+                denom = max(1, (max_level - int(level) + 1))
+                group_size = max(1, axis_len // denom)
 
             merged_hist = self.merge_axis(merged_hist, i, group_size)
             merged_sets = self.merge_sets_axis(merged_sets, i, group_size)
 
         self.sensitive_sets = merged_sets
         return merged_hist, merged_sets
+
 
 
 
@@ -280,7 +293,6 @@ class OLA_2:
         self.suppression_count = 0
         failing_mask = (histogram < k) & (histogram > 0)
         self.suppression_count = histogram[failing_mask].sum()
-
         if failing_mask.any():
             return False
 
@@ -288,11 +300,21 @@ class OLA_2:
         if self.sensitive_sets is None:
             raise ValueError("Sensitive sets not initialized.")
 
-        diverse_mask = np.vectorize(lambda s: len(s) >= l)(self.sensitive_sets)
+        # Ensure shapes align; if not, rebuild a same-shaped array of empty sets
+        if tuple(self.sensitive_sets.shape) != tuple(histogram.shape):
+            filled = np.empty_like(histogram, dtype=object)
+            it = np.nditer(histogram, flags=['multi_index'])
+            for _ in it:
+                filled[it.multi_index] = set()
+            self.sensitive_sets = filled
+
+        # len(None) safety
+        diverse_mask = np.vectorize(lambda s: (len(s) if isinstance(s, set) else 0) >= l)(self.sensitive_sets)
         suppressed = (~diverse_mask) & (histogram > 0)
 
         self.suppression_count += histogram[suppressed].sum()
         return not suppressed.any()
+
 
 
     def merge_histograms(self, histograms):
@@ -435,16 +457,6 @@ class OLA_2:
 
 
     def generalize_chunk(self, chunk, bin_widths):
-        """
-        Apply generalization to each record in a chunk based on given bin widths.
-
-        Parameters:
-        - chunk (DataFrame): Chunk to be generalized.
-        - bin_widths (list): Generalization levels or bin widths for each QI.
-
-        Returns:
-        - DataFrame: Generalized chunk.
-        """
         gen_chunk = chunk.copy(deep=False)
 
         for qi, bw in zip(self.quasi_identifiers, bin_widths):
@@ -457,67 +469,70 @@ class OLA_2:
                     "Gender": self.categorical_generalizer.generalize_gender
                 }
                 mapper = mapping.get(qi.column_name, self.categorical_generalizer.generalize_profession)
-
                 gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
 
             else:
                 col_temp = col.removesuffix("_encoded")
                 col_data = gen_chunk[col]
-                encoding_file = os.path.join("encodings", f"{col_temp.replace(' ', '_').lower()}_encoding.json")
-                print(f"Using encoding file: {encoding_file}")
+                encoding_dir = get_encoding_dir()
+                encoding_file = os.path.join(
+                    encoding_dir,
+                    f"{col_temp.replace(' ', '_').lower()}_encoding.json"
+                )
+
                 if os.path.exists(encoding_file):
-                    
                     with open(encoding_file, "r") as f:
                         raw_map = json.load(f)
-
                     encoding_map = raw_map["encoding_map"]
-                    decoding_map = {v: int(k) for k, v in encoding_map.items()}
+                    decoding_map = {int(v): int(k) for k, v in encoding_map.items()} if isinstance(next(iter(encoding_map.values())), int) else {v: int(k) for k, v in encoding_map.items()}
                     multiplier = raw_map.get("multiplier", 1)
-                    #print(f"Decoding map: {list(decoding_map.items())[:10]}") 
 
-                    min_val = col_data.min()
-                    max_val = col_data.max()
-                    print(f"Min value in {col}: {min_val}")
-                    print(f"Max value in {col}: {max_val}")
-                    print(f"Bin width for {col}: {bw}")
-                    bin_edges = list(range(min_val, max_val, int(bw)))
-                    if bin_edges[-1] < max_val + 1:
-                        bin_edges.append(max_val + 1)
-                    bin_edges = np.array(bin_edges)
+                    min_val = int(col_data.min())
+                    max_val = int(col_data.max())
 
-                    #print(f"Bin edges for {col}: {bin_edges}")
+                    # ensure at least two edges
+                    step = int(max(1, bw))
+                    if min_val == max_val:
+                        bin_edges = np.array([min_val, min_val + step])
+                    else:
+                        edges = list(range(min_val, max_val, step))
+                        if not edges or edges[-1] < max_val + 1:
+                            edges.append(max_val + 1)
+                        bin_edges = np.array(edges, dtype=int)
+
                     labels = []
                     for i in range(len(bin_edges) - 1):
                         start_enc = int(bin_edges[i])
-                        end_enc   = int(bin_edges[i+1] - 1)
-
-                        if i == len(bin_edges) - 2:  # last bin
+                        end_enc = int(bin_edges[i + 1] - 1)
+                        if i == len(bin_edges) - 2:
                             end_enc = int(max_val)
 
                         if multiplier != 1:
                             start_dec = decoding_map.get(start_enc, start_enc) / multiplier
-                            end_dec   = decoding_map.get(end_enc, end_enc) / multiplier
+                            end_dec = decoding_map.get(end_enc, end_enc) / multiplier
                         else:
                             start_dec = decoding_map.get(start_enc, start_enc)
-                            end_dec   = decoding_map.get(end_enc, end_enc)
+                            end_dec = decoding_map.get(end_enc, end_enc)
 
                         labels.append(f"[{start_dec}-{end_dec}]")
 
-                    #print(labels)
-                    gen_chunk[col_temp] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True,right=False)
+                    gen_chunk[col_temp] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True, right=False)
 
                 else:
-                    min_edge = (col_data.min() // bw) * bw
-                    max_edge = ((col_data.max() + bw - 1) // bw) * bw + 1
-                    bin_edges = np.arange(min_edge, max_edge, bw)
-                    labels = [
-                        f"[{int(bin_edges[i])}-{int(bin_edges[i + 1] - 1)}]"
-                        for i in range(len(bin_edges) - 1)
-                    ]
-
-                    gen_chunk[col] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True,right=False)
+                    min_val = int(col_data.min())
+                    max_val = int(col_data.max())
+                    step = int(max(1, bw))
+                    if min_val == max_val:
+                        bin_edges = np.array([min_val, min_val + step])
+                    else:
+                        start_edge = (min_val // step) * step
+                        end_edge = ((max_val + step - 1) // step) * step + 1
+                        bin_edges = np.arange(start_edge, end_edge, step, dtype=int)
+                    labels = [f"[{int(bin_edges[i])}-{int(bin_edges[i + 1] - 1)}]" for i in range(len(bin_edges) - 1)]
+                    gen_chunk[col] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True, right=False)
 
         return gen_chunk
+
     
     def combine_generalized_chunks_to_csv(self, generalized_chunks, output_path='generalized_chunk1.csv'):
         combined = pd.concat(generalized_chunks, ignore_index=True)

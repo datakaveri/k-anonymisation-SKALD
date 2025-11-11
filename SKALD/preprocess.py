@@ -88,30 +88,4 @@ def encrypt_columns(dataframe, columns_to_encrypt, key_dir="keys"):
     return dataframe
 
 
-def decrypt_columns(dataframe, key_file):
-    """
-    Decrypts encrypted columns using stored keys.
 
-    Args:
-        dataframe (pd.DataFrame): Input data (with encrypted columns).
-        key_file (str): Path to JSON file with keys.
-
-    Returns:
-        pd.DataFrame: Decrypted dataframe.
-    """
-    if not os.path.exists(key_file):
-        raise FileNotFoundError(f"Key file not found: {key_file}")
-
-    with open(key_file, "r") as f:
-        key_map = json.load(f)
-
-    for col, key in key_map.items():
-        if col not in dataframe.columns:
-            continue
-
-        fernet = Fernet(key.encode())
-        dataframe[col] = dataframe[col].apply(
-            lambda x: fernet.decrypt(x.encode()).decode()
-        )
-
-    return dataframe

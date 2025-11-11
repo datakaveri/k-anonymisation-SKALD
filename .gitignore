@@ -26,6 +26,7 @@ __pycache__/
 *.tmp
 *.json
 *.yaml
+*.html
 tests/
 notebooks/
 docs/
@@ -69,3 +70,4 @@ TransactionData/
 encoded_pins.txt
 *.pyc
 .dockerignore
+coverage.txt

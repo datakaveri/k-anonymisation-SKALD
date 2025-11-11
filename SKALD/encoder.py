@@ -1,55 +1,148 @@
+# SKALD/encoder.py
 import os
 import pandas as pd
 import json
-from SKALD.preprocess import suppress, pseudonymize
 from SKALD.utils import find_max_decimal_places
+
+
+def get_encoding_dir():
+    """Return the encoding directory, creating it if needed."""
+    try:
+        d = os.getenv("SKALD_ENCODING_DIR", "encodings")
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception as e:
+        raise OSError(f"Failed to create or access encoding directory '{d}': {e}") from e
+
+
+def to_py_int(x):
+    """Convert numpy.int64 or pandas Int64 to plain Python int."""
+    try:
+        return int(x)
+    except Exception as e:
+        raise ValueError(f"Failed to convert value '{x}' to int: {e}") from e
+
 
 def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
     """
-    Encode numerical columns across all chunks consistently.
-    
-    Returns a dictionary: {column_name: {encoding_map, decoding_map, multiplier, type}}
+    Encode all numerical columns across all chunks.
+    Safely handles reading, encoding, decimal detection, and file output.
+
+    Returns:
+        encoding_maps (dict)
     """
+
+    encoding_dir = get_encoding_dir()
     encoding_maps = {}
 
+    if not isinstance(chunk_files, list) or not chunk_files:
+        raise ValueError("chunk_files must be a non-empty list of filenames.")
+
+    if not os.path.isdir(chunk_dir):
+        raise FileNotFoundError(f"Chunk directory does not exist: {chunk_dir}")
+
+    # Loop through numerical QIs
     for info in numerical_columns_info:
-        column = info["column"]
-        encode = info.get("encode", False)
-        column_type = info.get("type", "float")
+        col = info.get("column")
+        if not col:
+            raise ValueError(f"Invalid numerical QI info (missing 'column'): {info}")
 
-        if not encode:
-            continue
+        should_encode = info.get("encode", False)
+        dtype = info.get("type", "float")
 
-        all_values = []
+        if not should_encode:
+            continue  # skip non-encoded columns
 
-        # Collect all values from all chunks
+        if dtype not in {"int", "float"}:
+            raise ValueError(f"Invalid dtype '{dtype}' for column '{col}'. Expected 'int' or 'float'.")
+
+        all_vals = []
+
+        # Read all chunks to collect values
         for filename in chunk_files:
-            chunk = pd.read_csv(os.path.join(chunk_dir, filename))
-            values = chunk[column].dropna()
-            if column_type == "float":
-                decimal_places = find_max_decimal_places(values)
-                multiplier = 10 ** decimal_places
-                values = (values * multiplier).round().astype(int)
+            file_path = os.path.join(chunk_dir, filename)
+
+            if not os.path.isfile(file_path):
+                raise FileNotFoundError(f"Chunk file not found: {file_path}")
+
+            try:
+                df = pd.read_csv(file_path)
+            except pd.errors.EmptyDataError:
+                raise ValueError(f"Chunk file '{filename}' is empty.")
+            except Exception as e:
+                raise RuntimeError(f"Failed to read chunk '{filename}': {e}") from e
+
+            if col not in df.columns:
+                raise KeyError(f"Column '{col}' not found in chunk '{filename}'.")
+
+            vals = df[col].dropna()
+
+            # Float encoding
+            if dtype == "float":
+                try:
+                    decimals = find_max_decimal_places(vals)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to determine decimal places for column '{col}' in chunk '{filename}': {e}"
+                    ) from e
+
+                try:
+                    multiplier = 10 ** decimals
+                    vals = (vals * multiplier).round().astype("int64")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to apply multiplier to float column '{col}' in chunk '{filename}': {e}"
+                    ) from e
+
             else:
                 multiplier = 1
-                values = values.astype(int)
+                try:
+                    vals = vals.astype("int64")
+                except Exception as e:
+                    raise ValueError(f"Column '{col}' contains non-integer values: {e}") from e
 
-            all_values.extend(values.tolist())
+            # Convert to python ints
+            try:
+                all_vals.extend(int(v) for v in vals.tolist())
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed converting encoded values for column '{col}' to Python int: {e}"
+                ) from e
 
-        # Create encoding map
-        unique_sorted = sorted(set(all_values))
-        encoding_map = {val: idx + 1 for idx, val in enumerate(unique_sorted)}
-        decoding_map = {idx: int(val) for val, idx in encoding_map.items()}
+        # Build sorted uniques
+        try:
+            unique_sorted = sorted(set(all_vals))
+        except Exception as e:
+            raise RuntimeError(f"Failed sorting values for column '{col}': {e}") from e
 
-        encoding_maps[column] = {
+        if not unique_sorted:
+            raise ValueError(f"Column '{col}' has no non-null values across chunks; cannot encode.")
+
+        # Build encoding + decoding maps
+        try:
+            encoding_map = {to_py_int(v): to_py_int(i + 1) for i, v in enumerate(unique_sorted)}
+            decoding_map = {to_py_int(i + 1): to_py_int(v) for i, v in enumerate(unique_sorted)}
+        except Exception as e:
+            raise RuntimeError(f"Failed building encoding maps for '{col}': {e}") from e
+
+        encoding_maps[col] = {
             "encoding_map": encoding_map,
             "decoding_map": decoding_map,
             "multiplier": int(multiplier),
-            "type": column_type
+            "type": dtype,
         }
 
-        # Save encoding map
-        with open(os.path.join(encoding_dir, f"{column.replace(' ','_').lower()}_encoding.json"), "w") as f:
-            json.dump(encoding_maps[column], f, indent=4)
+        # Write encoding JSON to file
+        try:
+            fname = f"{col.lower()}_encoding.json"
+            outpath = os.path.join(encoding_dir, fname)
+
+            with open(outpath, "w") as f:
+                json.dump(encoding_maps[col], f, indent=4)
+
+        except Exception as e:
+            raise OSError(
+                f"Failed writing encoding file '{fname}' in '{encoding_dir}': {e}"
+            ) from e
 
     return encoding_maps

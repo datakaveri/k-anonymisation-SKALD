@@ -1,135 +1,83 @@
 """
 Configuration schema and validation logic for the chunkanon pipeline.
-
-This module defines Pydantic models to load and validate a YAML-based configuration
-file for the chunk-based anonymization pipeline. It ensures data types, directory paths,
-and logical rules are enforced before processing begins.
 """
 
-from pydantic import BaseModel, Field, conlist, condecimal, field_validator, model_validator
+from pydantic import BaseModel, Field, condecimal, field_validator, model_validator, ValidationError
 from typing import List, Dict, Optional
 import os
 import yaml
 
 
+# -------------------------------
+# Numerical QI
+# -------------------------------
 class NumericalQuasiIdentifier(BaseModel):
-    """
-    Represents a numerical quasi-identifier (QID) in the dataset.
-
-    Attributes:
-        column (str): Name of the column.
-        encode (bool): Whether the column should be encoded.
-        type (str): Data type of the column, must be either 'int' or 'float'.
-    """
-
     column: str
     encode: bool
-    type: str  # Must be either 'int' or 'float'
+    type: str
 
     @field_validator("type")
     def validate_type(cls, v):
-        """Ensure type is either 'int' or 'float'."""
         if v not in {"int", "float"}:
             raise ValueError(f"Invalid type '{v}'. Must be 'int' or 'float'.")
         return v
 
     @model_validator(mode="before")
     def check_encode_for_float(cls, values):
-        """
-        Ensure that if type is 'float', then 'encode' must be True.
-        This is required for consistent binning logic.
-        """
-        type_value = values.get("type")
-        encode_value = values.get("encode")
-        if type_value == "float" and not encode_value:
-            raise ValueError(f"When type is 'float', 'encode' must be True.")
+        if not isinstance(values, dict):
+            raise ValueError("Invalid structure for NumericalQuasiIdentifier.")
+
+        t = values.get("type")
+        encode = values.get("encode")
+
+        if t == "float" and not encode:
+            raise ValueError("When type is 'float', 'encode' must be True.")
+
         return values
 
 
+# -------------------------------
+# Categorical QI
+# -------------------------------
 class CategoricalQuasiIdentifier(BaseModel):
-    """
-    Represents a categorical quasi-identifier (QID) in the dataset.
-
-    Attributes:
-        column (str): Name of the column.
-    """
     column: str
 
 
+# -------------------------------
+# QI Containers
+# -------------------------------
 class QuasiIdentifiers(BaseModel):
-    """
-    Container for both numerical and categorical quasi-identifiers.
-
-    Attributes:
-        numerical (List[NumericalQuasiIdentifier]): List of numerical QIDs.
-        categorical (List[CategoricalQuasiIdentifier]): List of categorical QIDs.
-    """
-
     numerical: List[NumericalQuasiIdentifier] = Field(default_factory=list)
     categorical: List[CategoricalQuasiIdentifier] = Field(default_factory=list)
-    '''
+
     @model_validator(mode="after")
-    def check_at_least_one_numerical(cls, values):
-        """Ensure that at least one numerical QID is provided."""
-        if not values.numerical:
-            raise ValueError("There must be at least one numerical quasi-identifier")
-        return valuesimport pandas as pd
-import psutil
-import os
+    def validate_qis(cls, values):
+        if not isinstance(values.numerical, list) or not isinstance(values.categorical, list):
+            raise ValueError("Numerical and categorical QI lists must be valid lists.")
 
-def split_csv_by_ram(input_csv, output_dir):
-    """
-    Splits a large CSV file into chunks based on 1/4th of total system RAM.
+        if len(values.numerical) == 0 and len(values.categorical) == 0:
+            raise ValueError("At least one quasi-identifier must be defined.")
 
-    Args:
-        input_csv (str): Path to the input CSV file.
-        output_dir (str): Directory where output chunks will be saved.
-    """
-    os.makedirs(output_dir, exist_ok=True)
+        return values
 
-    # --- Step 1. Detect total RAM ---
-    total_ram_bytes = psutil.virtual_memory().total
-    chunk_ram_bytes = total_ram_bytes // 4  # use one-fourth of RAM
-    chunk_ram_gb = chunk_ram_bytes / (1024 ** 3)
 
-    print(f"Total RAM detected: {total_ram_bytes / (1024 ** 3):.2f} GB")
-    print(f"Using ~{chunk_ram_gb:.2f} GB per chunk")
-
-    # --- Step 2. Estimate rows per chunk from sample ---
-    sample = pd.read_csv(input_csv, nrows=10000)
-    avg_row_size = sample.memory_usage(index=True, deep=True).sum() / len(sample)
-    rows_per_chunk = int(chunk_ram_bytes / avg_row_size)
-
-    print(f"≈ {rows_per_chunk:,} rows per chunk (~{chunk_ram_gb:.2f} GB)")
-
-    # --- Step 3. Stream the dataset and write chunks ---
-    reader = pd.read_csv(input_csv, chunksize=rows_per_chunk)
-    for i, chunk in enumerate(reader, start=1):
-        out_path = os.path.join(output_dir, f"chunk_{i}.csv")
-        chunk.to_csv(out_path, index=False)
-        print(f"✅ Wrote {out_path} ({len(chunk):,} rows)")
-
-    print("🎉 Done splitting CSV into chunks.")
-
-# Example usage
-# split_csv_by_ram("large_dataset.csv", "datachunks")
-
-    '''
-
+# -------------------------------
+# Main Config Object
+# -------------------------------
 class Config(BaseModel):
     k: Optional[int] = None
     l: Optional[int] = None
     suppression_limit: Optional[condecimal(ge=0, le=1)] = 0
+
     suppress: List[str] = Field(default_factory=list)
     pseudonymize: List[str] = Field(default_factory=list)
-    encrypt: List[str] = Field(default_factory=list)  # <-- NEW
-    enable_k_anonymity: bool = True  # <-- NEW
+    encrypt: List[str] = Field(default_factory=list)
+    enable_k_anonymity: bool = True
 
     output_path: str
     output_directory: str
     key_directory: str
     log_file: str
-
 
     quasi_identifiers: Optional[QuasiIdentifiers] = None
     sensitive_parameter: Optional[str] = None
@@ -138,73 +86,117 @@ class Config(BaseModel):
 
     @model_validator(mode="after")
     def check_k_fields(cls, values):
-        """Skip k/l/QI validation if k-anonymity is disabled."""
+        """
+        Validate k, l, and quasi_identifiers only when k-anonymity is enabled.
+        """
         if not values.enable_k_anonymity:
+            # In non-k-anonymity mode: no QI, k, l required
             return values
 
-        required = ["k", "l", "quasi_identifiers"]
-        for r in required:
-            if getattr(values, "k", None) is None:
-                raise ValueError(f"'{r}' must be provided when k-anonymity is enabled.")
+        # k-anonymity mode ON → all must exist
+        if values.k is None:
+            raise ValueError("'k' must be provided when k-anonymity is enabled.")
+        if values.l is None:
+            raise ValueError("'l' must be provided when k-anonymity is enabled.")
+        if values.quasi_identifiers is None:
+            raise ValueError("'quasi_identifiers' must be provided when k-anonymity is enabled.")
+
+        # Must have at least one QI
+        if (
+            not values.quasi_identifiers.numerical 
+            and not values.quasi_identifiers.categorical
+        ):
+            raise ValueError("At least one quasi-identifier must be defined.")
+
         return values
 
 
     @field_validator("bin_width_multiplication_factor")
-    @classmethod
     def validate_multiplication_factors(cls, v):
-        """
-        Ensure all bin width multiplication factors are greater than 1.
-        A factor of 1 or less does not scale the bin width.
-        """
-        for column, factor in v.items():
+        if not isinstance(v, dict):
+            raise ValueError("bin_width_multiplication_factor must be a dictionary.")
+
+        for col, factor in v.items():
+            if not isinstance(factor, int):
+                raise ValueError(f"Factor for '{col}' must be an integer.")
             if factor <= 1:
-                raise ValueError(f"Multiplication factor for '{column}' must be greater than 1, but found {factor}")
+                raise ValueError(f"Multiplication factor for '{col}' must be > 1. Found {factor}.")
         return v
-'''
+
     @model_validator(mode="after")
-    def check_paths(cls, values):
-        """
-        Check that the directories for chunk input, output path, and log file exist.
-        This helps catch missing directories before runtime errors occur.
-        """
-        chunk_directory = values.chunk_directory
-        if not os.path.isdir(chunk_directory):
-            raise ValueError(f"Chunk directory does not exist: {chunk_directory}")
+    def validate_paths(cls, values):
+        # Output directory
+        if not os.path.isdir(values.output_directory):
+            raise ValueError(f"Output directory does not exist: {values.output_directory}")
 
-        output_dir = os.path.dirname(values.output_path)
-        if output_dir and not os.path.exists(output_dir):
-            raise ValueError(f"Output directory does not exist: {output_dir}")
+        # Key directory
+        if not os.path.isdir(values.key_directory):
+            raise ValueError(f"Key directory does not exist: {values.key_directory}")
 
+        # Log file directory
         log_dir = os.path.dirname(values.log_file)
-        if log_dir and not os.path.exists(log_dir):
+        if log_dir and not os.path.isdir(log_dir):
             raise ValueError(f"Log directory does not exist: {log_dir}")
 
-        return values
-'''
+        # Output file parent check
+        out_dir_check = os.path.dirname(values.output_path)
+        if out_dir_check and not os.path.isdir(out_dir_check):
+            raise ValueError(f"Directory for output_path does not exist: {out_dir_check}")
 
+        return values
+
+
+# -------------------------------
+# Config Loader Function
+# -------------------------------
 def load_config(config_path: str):
     """
-    Load and validate the configuration from a YAML file.
-
-    Args:
-        config_path (str): Path to the YAML configuration file.
-
-    Returns:
-        Config: Validated configuration object.
-
-    Raises:
-        ValidationError: If the configuration does not meet schema or validation rules.
+    Load and validate YAML configuration with proper error handling.
+    Handles both k-anonymity enabled and disabled modes safely.
     """
-    from pydantic import ValidationError
+    if not isinstance(config_path, str):
+        raise TypeError("Config path must be a string.")
 
-    with open(config_path, "r") as f:
-        config_data = yaml.safe_load(f)
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
 
+    # --- Read YAML safely ---
+    try:
+        with open(config_path, "r") as f:
+            config_data = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML syntax in config file: {e}")
+    except Exception as e:
+        raise RuntimeError(f"Unable to read config file '{config_path}': {e}")
+
+    if not isinstance(config_data, dict):
+        raise ValueError("Config file must contain a valid YAML dictionary.")
+
+    # --- Special handling when k-anonymity disabled ---
+    enable_k = config_data.get("enable_k_anonymity", True)
+
+    # If disabled, ensure the fields that Pydantic expects exist (but can be empty)
+    if not enable_k:
+        # If quasi_identifiers exists as empty dict or empty structure, disable it
+        if "quasi_identifiers" in config_data:
+            if not config_data["quasi_identifiers"]:
+                config_data["quasi_identifiers"] = None
+        else:
+            config_data["quasi_identifiers"] = None
+
+        # Disable k & l too
+        config_data["k"] = None
+        config_data["l"] = None
+
+
+    # --- Validate using Pydantic ---
     try:
         config = Config(**config_data)
         print("Configuration validated successfully!")
         return config
+
     except ValidationError as e:
-        print("Validation errors occurred:")
-        print(e.json())
-        raise
+        print("Configuration validation error:")
+        print(e)
+        raise ValueError("Invalid configuration structure. See details above.")
+

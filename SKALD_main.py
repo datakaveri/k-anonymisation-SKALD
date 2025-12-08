@@ -38,7 +38,7 @@ def main_process(config):
     dataset = config["data_type"]
     conf = config[dataset]
 
-    if "chunking" in operations:
+    if "SKALD" in operations:
         try:
             suppress = conf.get("suppress", [])
             pseudonymize = conf.get("pseudonymize", [])

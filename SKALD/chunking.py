@@ -1,6 +1,7 @@
 import pandas as pd
 import psutil
 import os
+import shutil
 
 def split_csv_by_ram(data_dir="data"):
     """
@@ -24,7 +25,18 @@ def split_csv_by_ram(data_dir="data"):
         raise FileNotFoundError(f"Data directory does not exist: '{data_dir}'")
 
     os.makedirs("chunks", exist_ok=True)
-
+    chunks_dir = "chunks"
+    try:
+        for name in os.listdir(chunks_dir):
+            path = os.path.join(chunks_dir, name)
+            if os.path.isfile(path) or os.path.islink(path):
+                os.unlink(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
+    except Exception as e:
+        raise OSError(f"Failed clearing '{chunks_dir}': {e}")
+    else:
+        print(f"Cleared any existing contents of '{chunks_dir}'")
     # --- Find CSV file safely ---
     try:
         csv_files = [f for f in os.listdir(data_dir) if f.lower().endswith(".csv")]

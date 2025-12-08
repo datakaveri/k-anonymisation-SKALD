@@ -73,7 +73,7 @@ class Config(BaseModel):
     pseudonymize: List[str] = Field(default_factory=list)
     encrypt: List[str] = Field(default_factory=list)
     enable_k_anonymity: bool = True
-
+    enable_l_diversity: bool = False
     output_path: str
     output_directory: str
     key_directory: str
@@ -81,7 +81,7 @@ class Config(BaseModel):
 
     quasi_identifiers: Optional[QuasiIdentifiers] = None
     sensitive_parameter: Optional[str] = None
-    bin_width_multiplication_factor: Optional[Dict[str, int]] = {}
+    size: Optional[Dict[str, int]] = {}
     hardcoded_min_max: Optional[Dict[str, List[condecimal(ge=0)]]] = {}
 
     @model_validator(mode="after")
@@ -96,8 +96,9 @@ class Config(BaseModel):
         # k-anonymity mode ON → all must exist
         if values.k is None:
             raise ValueError("'k' must be provided when k-anonymity is enabled.")
-        if values.l is None:
-            raise ValueError("'l' must be provided when k-anonymity is enabled.")
+        if values.enable_l_diversity and values.l is None:
+            raise ValueError("'l' must be provided when l-diversity is enabled.")
+
         if values.quasi_identifiers is None:
             raise ValueError("'quasi_identifiers' must be provided when k-anonymity is enabled.")
 
@@ -111,10 +112,10 @@ class Config(BaseModel):
         return values
 
 
-    @field_validator("bin_width_multiplication_factor")
+    @field_validator("size")
     def validate_multiplication_factors(cls, v):
         if not isinstance(v, dict):
-            raise ValueError("bin_width_multiplication_factor must be a dictionary.")
+            raise ValueError("size must be a dictionary.")
 
         for col, factor in v.items():
             if not isinstance(factor, int):

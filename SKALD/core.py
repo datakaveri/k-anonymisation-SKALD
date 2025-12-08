@@ -78,8 +78,7 @@ def run_pipeline(
     from SKALD.preprocess import suppress, pseudonymize, encrypt_columns
 
     print("Running suppression + pseudonymization + encryption ")
-    _ensure_dir(config.output_directory)
-    _ensure_dir(config.key_directory)
+    output_directory = config.output_directory
 
     # Validate data directory and files
     data_dir = "data"
@@ -142,6 +141,17 @@ def run_pipeline(
 
             # If k-anonymity is disabled, emit JSON per-chunk
             if not config.enable_k_anonymity:
+
+                output_chunks_dir = os.path.join(os.getcwd(), "output_chunks")
+                _ensure_dir(output_chunks_dir)
+
+                chunk_csv_output = os.path.join(
+                    output_chunks_dir,
+                    f"{os.path.basename(chunk)}_processed.csv"
+                )
+
+                df.to_csv(chunk_csv_output, index=False)
+                print(f"Chunk saved at: {chunk_csv_output}")
                 json_output = df.to_json(orient="records")
                 output_json_dir = os.path.join(os.getcwd(), "output")
                 _ensure_dir(output_json_dir)
@@ -194,7 +204,9 @@ def run_pipeline(
 
     # === PIPELINE PARAMETERS ===
     k = config.k
-    l = config.l
+    l = 1
+    if config.enable_l_diversity :
+        l = config.l
     chunk_dir_fs = chunk_dir or "chunks"
     output_path = config.output_path
     suppression_limit = config.suppression_limit
@@ -217,7 +229,7 @@ def run_pipeline(
         for num_qi in config.quasi_identifiers.numerical
     ]
     hardcoded_min_max = config.hardcoded_min_max
-    multiplication_factors = config.bin_width_multiplication_factor or {}
+    multiplication_factors = config.size or {}
     print("multiplication_factors:", multiplication_factors)
 
     # === VALIDATE CHUNK DIRECTORY ===
@@ -279,7 +291,15 @@ def run_pipeline(
 
     # === BUILD OLA_2 TREE FOR FINAL BIN WIDTHS ===
     try:
-        ola_2 = OLA_2(quasi_identifiers, total_records, suppression_limit, multiplication_factors, sensitive_parameter)
+        ola_2 = OLA_2(
+            quasi_identifiers,
+            total_records,
+            suppression_limit,
+            multiplication_factors,
+            sensitive_parameter,
+            enable_l_diversity=config.enable_l_diversity
+        )
+
         print("\nBuilding second tree with initial Ri values as root...")
         ola_2.build_tree(initial_ri)
     except Exception as e:
@@ -325,15 +345,33 @@ def run_pipeline(
             # Soft-fail on cleanup
             pass
 
-    # === OPTIONALLY GENERALIZE FIRST CHUNK ===
     try:
-        if all_files:
-            generalize_first_chunk(
-                all_files[0], output_path, numerical_columns_info, encoding_maps, ola_2, final_rf
-            )
+        for idx, chunk_file in enumerate(all_files, start=1):
+
+            # Ensure output directory exists
+            os.makedirs(output_directory, exist_ok=True)
+
+            # Build output filename inside output_directory
+            base_name = f"{output_path.rstrip('.csv')}_chunk{idx}.csv"
+            output_file = os.path.join(output_directory, base_name)
+
+            try:
+                generalize_first_chunk(
+                    chunk_file,
+                    output_file,
+                    numerical_columns_info,
+                    encoding_maps,
+                    ola_2,
+                    final_rf
+                )
+
+                print(f"Generalized '{chunk_file}' -> '{output_file}'")
+
+            except Exception as chunk_err:
+                print(f"Failed to generalize chunk '{chunk_file}' to '{output_file}': {chunk_err}")
+
     except Exception as e:
-        # Don't fail the whole pipeline if generalization write fails; log and continue
-        logger.exception(f"Failed to generalize first chunk to '{output_path}': {e}")
+        logger.exception(f"Generalization process failed: {e}")
 
     # === PIPELINE TIMING AND LOGGING ===
     elapsed_time = time.time() - start_time
@@ -353,7 +391,7 @@ def _entry_main():
     Expects a JSON config in ./config/<first file>.json and builds a temp YAML for run_pipeline.
     """
 
-    '''
+    
     config_root = "config"
     if not os.path.isdir(config_root):
         raise FileNotFoundError(f"Config directory not found: {config_root}")
@@ -363,8 +401,8 @@ def _entry_main():
         raise FileNotFoundError(f"No config file found in '{config_root}'")
 
     CONFIG_PATH = os.path.join('config', config_files[0])
-    '''
-    CONFIG_PATH = "config_beneficiary.json"
+    
+    #CONFIG_PATH = "kconfig_beneficiary.json"
     print(f"Running SKALD pipeline with config: {CONFIG_PATH}")
 
     with open(CONFIG_PATH, "r") as f:
@@ -377,25 +415,26 @@ def _entry_main():
     dataset = config["data_type"]
     conf = config.get(dataset, {})
 
-    if "chunking" in operations:
+    if "SKALD" in operations:
         k_conf = conf.get("k_anonymize", {}) or {}
         l_conf = conf.get("l_diversity", {}) or {}
 
         yaml_config = {
             "enable_k_anonymity": conf.get("enable_k_anonymity", True),
+            "enable_l_diversity": conf.get("enable_l_diversity", False),
             "output_path": conf.get("output_path", "generalized_chunk1.csv"),
-            "output_directory": conf.get("output_directory", "pipelineOutput"),
+            "output_directory": conf.get("output_directory", "output"),
             "key_directory": conf.get("key_directory", "keys"),
             "log_file": conf.get("log_file", "log.txt"),
             "suppress": conf.get("suppress", []),
             "pseudonymize": conf.get("pseudonymize", []),
             "encrypt": conf.get("encrypt", []),
             "quasi_identifiers": conf.get("quasi_identifiers", {}),
-            "k": k_conf.get("k"),
-            "l": l_conf.get("l"),
+            "k": k_conf.get("k", 1),
+            "l": l_conf.get("l", 1),
             "sensitive_parameter": conf.get("sensitive_parameter"),
-            "bin_width_multiplication_factor": conf.get("bin_width_multiplication_factor", {}),
-            "hardcoded_min_max": conf.get("hardcoded_min_max", {}),
+            "size": conf.get("size", {}),
+            "hardcoded_min_max": conf.get("hardcoded_min_max", {"AGE": [0, 100]}),
             "suppression_limit": conf.get("suppression_limit", 0),
         }
 

@@ -1,310 +1,245 @@
 === SKALD Log File Created ===
-2025-10-17 20:50:33,266 - INFO - Available RAM: 8452218880, maximum number of equivalence classes: 528263680
-2025-10-17 20:50:33,266 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 20:50:33,276 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 20:50:33,276 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.60 MB
-2025-10-17 20:50:33,415 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 20:50:33,415 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 20:50:33,415 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 123.66 MB
-2025-10-17 20:50:33,446 - INFO - [SKALD full pipeline] Time taken: 0.18 sec | Memory: 125.86 MB
+2025-11-13 05:10:24,885 - INFO - Available RAM: 11379138560, maximum number of equivalence classes: 1137913
+2025-11-13 05:10:38,356 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-13 05:10:38,356 - INFO - [OLA_1 tree] Time taken: 13.47 sec | Memory: 2708.53 MB
+2025-11-13 05:15:03,991 - INFO - Final bin widths (RF): [1, 1]
+2025-11-13 05:15:03,991 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-13 05:15:03,991 - INFO - [OLA_2 tree] Time taken: 279.11 sec | Memory: 2828.60 MB
+2025-11-13 05:15:44,205 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-13 05:17:17,691 - INFO - Generalized 'chunk_2.csv' -> 'generalized_chunk1_chunk2.csv'
+2025-11-13 05:17:32,756 - INFO - Generalized 'chunk_3.csv' -> 'generalized_chunk1_chunk3.csv'
+2025-11-13 05:17:32,757 - INFO - [SKALD full pipeline] Time taken: 427.87 sec | Memory: 2928.47 MB
 === SKALD Completed ===
 
-2025-10-17 20:51:39,408 - INFO - Available RAM: 8566878208, maximum number of equivalence classes: 535429888
-2025-10-17 20:51:39,408 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 20:51:40,809 - INFO - Initial bin widths (Ri): [1, 1, 1, 1, 1]
-2025-10-17 20:51:40,809 - INFO - [OLA_1 tree] Time taken: 1.40 sec | Memory: 122.96 MB
-2025-10-17 21:05:41,090 - INFO - Available RAM: 8069021696, maximum number of equivalence classes: 26896738
-2025-10-17 21:05:41,090 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:05:41,101 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:05:41,102 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.94 MB
-2025-10-17 21:05:41,254 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:05:41,254 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:05:41,254 - INFO - [OLA_2 tree] Time taken: 0.16 sec | Memory: 124.26 MB
-2025-10-17 21:05:41,308 - INFO - [SKALD full pipeline] Time taken: 0.22 sec | Memory: 126.32 MB
+2025-11-13 06:15:22,112 - INFO - Available RAM: 11225841664, maximum number of equivalence classes: 1122584
+2025-11-13 06:15:35,079 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-13 06:15:35,080 - INFO - [OLA_1 tree] Time taken: 12.97 sec | Memory: 2652.84 MB
+2025-11-13 06:17:23,056 - INFO - Final bin widths (RF): [1, 1]
+2025-11-13 06:17:23,056 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-13 06:17:23,056 - INFO - [OLA_2 tree] Time taken: 120.94 sec | Memory: 2921.57 MB
+2025-11-13 06:18:07,666 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-13 06:18:07,667 - INFO - [SKALD full pipeline] Time taken: 165.55 sec | Memory: 2992.04 MB
 === SKALD Completed ===
 
-2025-10-17 21:08:34,990 - INFO - Available RAM: 8162471936, maximum number of equivalence classes: 2720823
-2025-10-17 21:08:34,991 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:08:35,001 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:08:35,001 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.77 MB
-2025-10-17 21:08:35,136 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:08:35,137 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:08:35,137 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 124.18 MB
-2025-10-17 21:08:35,170 - INFO - [SKALD full pipeline] Time taken: 0.18 sec | Memory: 126.21 MB
+2025-11-13 06:35:53,218 - INFO - Available RAM: 11453603840, maximum number of equivalence classes: 1145360
+2025-11-13 06:36:06,217 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-13 06:36:06,218 - INFO - [OLA_1 tree] Time taken: 13.00 sec | Memory: 2798.57 MB
+2025-11-13 06:37:54,633 - INFO - Final bin widths (RF): [1, 1]
+2025-11-13 06:37:54,633 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.02
+2025-11-13 06:37:54,633 - INFO - [OLA_2 tree] Time taken: 121.42 sec | Memory: 2923.18 MB
+2025-11-13 06:38:39,084 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-13 06:38:39,084 - INFO - [SKALD full pipeline] Time taken: 165.87 sec | Memory: 2998.72 MB
 === SKALD Completed ===
 
-2025-10-17 21:10:40,948 - INFO - Available RAM: 7913607168, maximum number of equivalence classes: (791360716, 0)
-2025-10-17 21:10:40,948 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:10:48,351 - INFO - Available RAM: 7945138176, maximum number of equivalence classes: 794513
-2025-10-17 21:10:48,351 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:10:48,362 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:10:48,362 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.67 MB
-2025-10-17 21:10:48,513 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:10:48,513 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:10:48,513 - INFO - [OLA_2 tree] Time taken: 0.16 sec | Memory: 124.15 MB
-2025-10-17 21:10:48,551 - INFO - [SKALD full pipeline] Time taken: 0.20 sec | Memory: 126.19 MB
+2025-11-13 06:41:45,487 - INFO - Available RAM: 11525472256, maximum number of equivalence classes: 1152547
+2025-11-13 06:41:58,408 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-13 06:41:58,408 - INFO - [OLA_1 tree] Time taken: 12.92 sec | Memory: 2790.92 MB
+2025-11-13 06:43:46,121 - INFO - Final bin widths (RF): [1, 1]
+2025-11-13 06:43:46,121 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.02
+2025-11-13 06:43:46,121 - INFO - [OLA_2 tree] Time taken: 120.63 sec | Memory: 2891.73 MB
+2025-11-13 06:44:30,146 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-13 06:44:30,147 - INFO - [SKALD full pipeline] Time taken: 164.66 sec | Memory: 2967.23 MB
 === SKALD Completed ===
 
-2025-10-17 21:11:07,174 - INFO - Available RAM: 7977828352, maximum number of equivalence classes: 797782
-2025-10-17 21:11:07,174 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:11:07,185 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:11:07,185 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.21 MB
-2025-10-17 21:11:07,320 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:11:07,320 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:11:07,321 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 123.74 MB
-2025-10-17 21:11:07,354 - INFO - [SKALD full pipeline] Time taken: 0.18 sec | Memory: 125.90 MB
+2025-11-13 06:50:38,729 - INFO - Available RAM: 11516657664, maximum number of equivalence classes: 1151665
+2025-11-13 06:50:52,012 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-13 06:50:52,012 - INFO - [OLA_1 tree] Time taken: 13.28 sec | Memory: 2652.07 MB
+2025-11-13 06:52:39,769 - INFO - Final bin widths (RF): [1, 1]
+2025-11-13 06:52:39,770 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-13 06:52:39,770 - INFO - [OLA_2 tree] Time taken: 121.04 sec | Memory: 2768.54 MB
+2025-11-13 06:53:22,718 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-13 06:53:22,719 - INFO - [SKALD full pipeline] Time taken: 163.99 sec | Memory: 2824.12 MB
 === SKALD Completed ===
 
-2025-10-17 21:12:04,315 - INFO - Available RAM: 6766727168, maximum number of equivalence classes: 676672
-2025-10-17 21:12:04,315 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:12:04,326 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:12:04,326 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.85 MB
-2025-10-17 21:12:04,462 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:12:04,462 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:12:04,463 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 124.14 MB
-2025-10-17 21:12:04,499 - INFO - [SKALD full pipeline] Time taken: 0.18 sec | Memory: 126.20 MB
+2025-11-18 05:27:29,437 - INFO - Available RAM: 13595631616, maximum number of equivalence classes: 1359563
+2025-11-18 05:27:56,724 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 05:27:56,724 - INFO - [OLA_1 tree] Time taken: 12.74 sec | Memory: 2788.57 MB
+2025-11-18 05:29:43,104 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 05:29:43,104 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 05:29:43,104 - INFO - [OLA_2 tree] Time taken: 119.12 sec | Memory: 2766.59 MB
+2025-11-18 05:34:23,636 - INFO - Available RAM: 14336794624, maximum number of equivalence classes: 1433679
+2025-11-18 05:34:28,438 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 05:34:28,438 - INFO - [OLA_1 tree] Time taken: 4.80 sec | Memory: 1483.27 MB
+2025-11-18 05:36:06,996 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 05:36:06,996 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 05:36:06,996 - INFO - [OLA_2 tree] Time taken: 103.36 sec | Memory: 1517.15 MB
+2025-11-18 05:36:27,822 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-18 05:36:27,822 - INFO - [SKALD full pipeline] Time taken: 124.19 sec | Memory: 1518.08 MB
 === SKALD Completed ===
 
-2025-10-17 21:12:43,213 - INFO - Available RAM: 6788382720, maximum number of equivalence classes: 678838
-2025-10-17 21:12:43,213 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:12:43,223 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:12:43,223 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.34 MB
-2025-10-17 21:12:43,365 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:12:43,365 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:12:43,365 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 123.52 MB
-2025-10-17 21:12:43,408 - INFO - [SKALD full pipeline] Time taken: 0.19 sec | Memory: 125.64 MB
+2025-11-18 06:17:04,941 - INFO - Available RAM: 14379761664, maximum number of equivalence classes: 1437976
+2025-11-18 06:17:08,446 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 06:17:08,447 - INFO - [OLA_1 tree] Time taken: 3.06 sec | Memory: 1517.68 MB
+2025-11-18 06:18:25,438 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 06:18:25,438 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 06:18:25,439 - INFO - [OLA_2 tree] Time taken: 80.05 sec | Memory: 1547.96 MB
+2025-11-18 06:18:39,989 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-18 06:18:39,989 - INFO - [SKALD full pipeline] Time taken: 94.60 sec | Memory: 1548.98 MB
 === SKALD Completed ===
 
-2025-10-17 21:12:56,355 - INFO - Available RAM: 6911008768, maximum number of equivalence classes: 691100
-2025-10-17 21:12:56,355 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:12:56,366 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:12:56,366 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 118.92 MB
-2025-10-17 21:12:56,507 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:12:56,507 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:12:56,507 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 123.45 MB
-2025-10-17 21:12:56,541 - INFO - [SKALD full pipeline] Time taken: 0.19 sec | Memory: 125.36 MB
+2025-11-18 06:29:17,670 - INFO - Available RAM: 14088577024, maximum number of equivalence classes: 1408857
+2025-11-18 06:29:20,798 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 06:29:20,798 - INFO - [OLA_1 tree] Time taken: 3.13 sec | Memory: 1029.23 MB
+2025-11-18 06:30:34,729 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 06:30:34,729 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 06:30:34,729 - INFO - [OLA_2 tree] Time taken: 77.06 sec | Memory: 1222.23 MB
+2025-11-18 06:30:49,385 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-18 06:30:49,386 - INFO - [SKALD full pipeline] Time taken: 91.72 sec | Memory: 1062.18 MB
 === SKALD Completed ===
 
-2025-10-17 21:13:55,338 - INFO - Available RAM: 5914030080, maximum number of equivalence classes: 591403
-2025-10-17 21:13:55,338 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:13:55,348 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:13:55,348 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.59 MB
-2025-10-17 21:13:55,512 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:13:55,513 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:13:55,513 - INFO - [OLA_2 tree] Time taken: 0.17 sec | Memory: 123.88 MB
-2025-10-17 21:13:55,554 - INFO - [SKALD full pipeline] Time taken: 0.22 sec | Memory: 126.12 MB
+2025-11-18 06:32:50,769 - INFO - Available RAM: 13714055168, maximum number of equivalence classes: 1371405
+2025-11-18 06:32:53,883 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 06:32:53,883 - INFO - [OLA_1 tree] Time taken: 3.11 sec | Memory: 920.57 MB
+2025-11-18 06:34:08,882 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 06:34:08,882 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 06:34:08,883 - INFO - [OLA_2 tree] Time taken: 78.11 sec | Memory: 1281.56 MB
+2025-11-18 06:34:23,132 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-18 06:34:23,132 - INFO - [SKALD full pipeline] Time taken: 92.36 sec | Memory: 941.70 MB
 === SKALD Completed ===
 
-2025-10-17 21:57:55,711 - INFO - Available RAM: 6917566464, maximum number of equivalence classes: 691756
-2025-10-17 21:57:55,711 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 21:57:55,722 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 21:57:55,722 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.73 MB
-2025-10-17 21:57:55,861 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 21:57:55,861 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 21:57:55,861 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 124.13 MB
-2025-10-17 21:57:55,892 - INFO - [SKALD full pipeline] Time taken: 0.18 sec | Memory: 126.29 MB
+2025-11-18 06:35:47,016 - INFO - Available RAM: 14338990080, maximum number of equivalence classes: 1433899
+2025-11-18 06:35:50,144 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 06:35:50,144 - INFO - [OLA_1 tree] Time taken: 3.13 sec | Memory: 1478.84 MB
+2025-11-18 06:37:07,094 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 06:37:07,094 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 06:37:07,094 - INFO - [OLA_2 tree] Time taken: 80.08 sec | Memory: 1517.66 MB
+2025-11-18 06:37:21,523 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-18 06:37:21,523 - INFO - [SKALD full pipeline] Time taken: 94.51 sec | Memory: 1564.68 MB
 === SKALD Completed ===
 
-2025-10-17 22:12:44,692 - INFO - Available RAM: 7073624064, maximum number of equivalence classes: 707362
-2025-10-17 22:17:33,856 - INFO - Available RAM: 6902890496, maximum number of equivalence classes: 690289
-2025-10-17 22:17:33,856 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 22:19:46,158 - INFO - Available RAM: 6495297536, maximum number of equivalence classes: 649529
-2025-10-17 22:19:46,159 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 22:19:46,169 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 22:19:46,169 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.39 MB
-2025-10-17 22:22:06,007 - INFO - Available RAM: 6710972416, maximum number of equivalence classes: 671097
-2025-10-17 22:22:06,007 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 22:22:06,018 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 22:22:06,019 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.59 MB
-2025-10-17 22:22:06,155 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 22:22:06,155 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 22:22:06,156 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 123.20 MB
-2025-10-17 22:22:06,156 - INFO - [SKALD full pipeline] Time taken: 0.15 sec | Memory: 123.20 MB
+2025-11-18 06:39:25,663 - INFO - Available RAM: 13930143744, maximum number of equivalence classes: 1393014
+2025-11-18 06:39:28,883 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 06:39:28,884 - INFO - [OLA_1 tree] Time taken: 3.22 sec | Memory: 1479.81 MB
+2025-11-18 06:40:43,478 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 06:40:43,478 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 06:40:43,478 - INFO - [OLA_2 tree] Time taken: 77.81 sec | Memory: 1516.83 MB
+2025-11-18 06:40:56,973 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-18 06:40:56,973 - INFO - [SKALD full pipeline] Time taken: 91.31 sec | Memory: 1563.79 MB
 === SKALD Completed ===
 
-2025-10-17 22:22:29,287 - INFO - Available RAM: 6718464000, maximum number of equivalence classes: 671846
-2025-10-17 22:22:29,287 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 22:22:29,298 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 22:22:29,298 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.35 MB
-2025-10-17 22:22:29,440 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 22:22:29,440 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 22:22:29,440 - INFO - [OLA_2 tree] Time taken: 0.15 sec | Memory: 122.89 MB
-2025-10-17 22:22:29,441 - INFO - [SKALD full pipeline] Time taken: 0.15 sec | Memory: 122.89 MB
+2025-11-18 06:51:43,576 - INFO - Available RAM: 13764599808, maximum number of equivalence classes: 1376459
+2025-11-18 06:51:46,719 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 06:51:46,719 - INFO - [OLA_1 tree] Time taken: 3.14 sec | Memory: 1029.09 MB
+2025-11-18 06:53:01,227 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 06:53:01,227 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 06:53:01,227 - INFO - [OLA_2 tree] Time taken: 77.65 sec | Memory: 1060.25 MB
+2025-11-18 06:53:14,773 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-18 06:53:14,773 - INFO - [SKALD full pipeline] Time taken: 91.20 sec | Memory: 1061.03 MB
 === SKALD Completed ===
 
-2025-10-17 22:22:38,053 - INFO - Available RAM: 6742855680, maximum number of equivalence classes: 674285
-2025-10-17 22:22:38,054 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 22:22:38,064 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 22:22:38,064 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.50 MB
-2025-10-17 22:22:38,213 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 22:22:38,213 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 22:22:38,213 - INFO - [OLA_2 tree] Time taken: 0.16 sec | Memory: 122.88 MB
-2025-10-17 22:22:38,213 - INFO - [SKALD full pipeline] Time taken: 0.16 sec | Memory: 122.88 MB
+2025-11-18 06:58:27,792 - INFO - Available RAM: 13959823360, maximum number of equivalence classes: 1395982
+2025-11-18 06:58:30,846 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 06:58:30,846 - INFO - [OLA_1 tree] Time taken: 3.05 sec | Memory: 1199.11 MB
+2025-11-18 06:59:48,229 - INFO - Final bin widths (RF): [1, 1]
+2025-11-18 06:59:48,229 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-18 06:59:48,229 - INFO - [OLA_2 tree] Time taken: 80.44 sec | Memory: 1011.29 MB
+2025-11-18 07:00:02,820 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-18 07:00:02,821 - INFO - [SKALD full pipeline] Time taken: 95.03 sec | Memory: 1013.12 MB
 === SKALD Completed ===
 
-2025-10-17 22:29:23,847 - INFO - Available RAM: 6836502528, maximum number of equivalence classes: 683650
-2025-10-17 22:29:23,847 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 22:29:36,993 - INFO - Available RAM: 6733418496, maximum number of equivalence classes: 673341
-2025-10-17 22:29:36,993 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 22:29:37,004 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 22:29:37,004 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.46 MB
-2025-10-17 22:29:37,159 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 22:29:37,159 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 22:29:37,159 - INFO - [OLA_2 tree] Time taken: 0.17 sec | Memory: 122.86 MB
-2025-10-17 22:29:37,159 - INFO - [SKALD full pipeline] Time taken: 0.17 sec | Memory: 122.86 MB
+2025-11-18 08:12:37,969 - INFO - Available RAM: 14033211392, maximum number of equivalence classes: 1403321
+2025-11-18 08:12:41,105 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-18 08:12:41,105 - INFO - [OLA_1 tree] Time taken: 3.14 sec | Memory: 1510.60 MB
+2025-11-20 06:20:42,481 - INFO - Available RAM: 14001635328, maximum number of equivalence classes: 1400163
+2025-11-20 06:20:46,158 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 06:20:46,159 - INFO - [OLA_1 tree] Time taken: 3.15 sec | Memory: 1501.70 MB
+2025-11-20 06:23:33,343 - INFO - Available RAM: 14237786112, maximum number of equivalence classes: 1423778
+2025-11-20 06:23:36,495 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 06:23:36,496 - INFO - [OLA_1 tree] Time taken: 3.15 sec | Memory: 1509.44 MB
+2025-11-20 06:25:06,590 - INFO - Final bin widths (RF): [1, 1]
+2025-11-20 06:25:06,590 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-20 06:25:06,590 - INFO - [OLA_2 tree] Time taken: 93.25 sec | Memory: 1546.07 MB
+2025-11-20 06:25:21,255 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-20 06:25:21,256 - INFO - [SKALD full pipeline] Time taken: 107.91 sec | Memory: 1578.04 MB
 === SKALD Completed ===
 
-2025-10-17 22:37:47,129 - INFO - Available RAM: 6603849728, maximum number of equivalence classes: 660384
-2025-10-17 22:37:47,129 - INFO - Starting SKALD pipeline: chunks=1, k=50, l=6
-2025-10-17 22:37:47,140 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-17 22:37:47,140 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 119.82 MB
-2025-10-17 22:37:47,298 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-17 22:37:47,298 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-17 22:37:47,298 - INFO - [OLA_2 tree] Time taken: 0.17 sec | Memory: 123.23 MB
-2025-10-17 22:37:47,298 - INFO - [SKALD full pipeline] Time taken: 0.17 sec | Memory: 123.23 MB
+2025-11-20 06:27:27,334 - INFO - Available RAM: 13891076096, maximum number of equivalence classes: 1389107
+2025-11-20 06:27:30,496 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 06:27:30,497 - INFO - [OLA_1 tree] Time taken: 3.16 sec | Memory: 1515.91 MB
+2025-11-20 06:28:59,655 - INFO - Final bin widths (RF): [1, 1]
+2025-11-20 06:28:59,655 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-20 06:28:59,655 - INFO - [OLA_2 tree] Time taken: 92.32 sec | Memory: 1546.00 MB
+2025-11-20 06:29:14,384 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-20 06:29:14,384 - INFO - [SKALD full pipeline] Time taken: 107.05 sec | Memory: 1578.11 MB
 === SKALD Completed ===
 
-2025-10-30 07:40:49,962 - INFO - Available RAM: 1644544000, maximum number of equivalence classes: 164454
-2025-10-30 07:40:49,979 - INFO - Initial bin widths (Ri): [1, 1, 1]
-2025-10-30 07:40:49,979 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 90.23 MB
-2025-10-30 07:40:50,135 - INFO - Final bin widths (RF): [4, 3, 1]
-2025-10-30 07:40:50,135 - INFO - Lowest DM*: 745524, EQ Classes: 34, Supp%: 0.00
-2025-10-30 07:40:50,135 - INFO - [OLA_2 tree] Time taken: 0.17 sec | Memory: 94.17 MB
-2025-10-30 07:40:50,135 - INFO - [SKALD full pipeline] Time taken: 0.17 sec | Memory: 94.17 MB
+2025-11-20 06:30:06,782 - INFO - Available RAM: 14018244608, maximum number of equivalence classes: 1401824
+2025-11-20 06:30:09,881 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 06:30:09,881 - INFO - [OLA_1 tree] Time taken: 3.10 sec | Memory: 1506.07 MB
+2025-11-20 06:30:59,680 - INFO - Available RAM: 13762048000, maximum number of equivalence classes: 1376204
+2025-11-20 06:31:02,702 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 06:31:02,702 - INFO - [OLA_1 tree] Time taken: 3.02 sec | Memory: 1129.55 MB
+2025-11-20 06:32:31,136 - INFO - Final bin widths (RF): [1, 1]
+2025-11-20 06:32:31,136 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-20 06:32:31,137 - INFO - [OLA_2 tree] Time taken: 91.46 sec | Memory: 1089.07 MB
+2025-11-20 06:32:46,197 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-20 06:32:46,197 - INFO - [SKALD full pipeline] Time taken: 106.52 sec | Memory: 1237.57 MB
 === SKALD Completed ===
 
-2025-10-30 07:40:50,137 - INFO - 172.18.0.1 - - [30/Oct/2025 07:40:50] "POST /process_SKALD HTTP/1.1" 200 -
-2025-11-03 06:20:16,999 - INFO -  * Detected change in '/app/SKALD_server.py', reloading
-2025-11-03 12:14:37,709 - INFO - Available RAM: 6980149248, maximum number of equivalence classes: 698014
-2025-11-06 17:13:25,921 - INFO - Available RAM: 5409374208, maximum number of equivalence classes: 540937
-2025-11-06 17:16:08,060 - INFO - Available RAM: 5450166272, maximum number of equivalence classes: 545016
-2025-11-06 17:16:56,497 - INFO - Available RAM: 5419384832, maximum number of equivalence classes: 541938
-2025-11-06 17:20:45,757 - INFO - Available RAM: 5609590784, maximum number of equivalence classes: 560959
-2025-11-06 17:21:40,273 - INFO - Available RAM: 5397250048, maximum number of equivalence classes: 539725
-2025-11-06 17:22:30,817 - INFO - Available RAM: 5482250240, maximum number of equivalence classes: 548225
-2025-11-06 17:23:05,624 - INFO - Available RAM: 5462958080, maximum number of equivalence classes: 546295
-2025-11-06 17:23:15,999 - INFO - Available RAM: 5513023488, maximum number of equivalence classes: 551302
-2025-11-06 17:23:39,345 - INFO - Available RAM: 5457620992, maximum number of equivalence classes: 545762
-2025-11-06 17:23:59,017 - INFO - Available RAM: 5478326272, maximum number of equivalence classes: 547832
-2025-11-06 17:25:08,574 - INFO - Available RAM: 5473640448, maximum number of equivalence classes: 547364
-2025-11-06 17:26:19,716 - INFO - Available RAM: 5332881408, maximum number of equivalence classes: 533288
-2025-11-06 17:27:53,246 - INFO - Available RAM: 5411926016, maximum number of equivalence classes: 541192
-2025-11-06 17:27:53,255 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:27:53,255 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.39 MB
-2025-11-06 17:28:21,836 - INFO - Available RAM: 5347758080, maximum number of equivalence classes: 534775
-2025-11-06 17:28:21,845 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:28:21,845 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.54 MB
-2025-11-06 17:28:50,598 - INFO - Available RAM: 5323354112, maximum number of equivalence classes: 532335
-2025-11-06 17:28:50,606 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:28:50,606 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.81 MB
-2025-11-06 17:28:50,708 - INFO - Final bin widths (RF): [1, 1]
-2025-11-06 17:28:50,708 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 15.23
-2025-11-06 17:28:50,708 - INFO - [OLA_2 tree] Time taken: 0.11 sec | Memory: 130.20 MB
-2025-11-06 17:28:50,708 - INFO - [SKALD full pipeline] Time taken: 0.11 sec | Memory: 130.20 MB
+2025-11-20 07:00:23,038 - INFO - Available RAM: 12283232256, maximum number of equivalence classes: 1228323
+2025-11-20 07:00:26,358 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 07:00:26,358 - INFO - [OLA_1 tree] Time taken: 3.32 sec | Memory: 1184.34 MB
+2025-11-20 07:20:05,340 - INFO - Available RAM: 11652431872, maximum number of equivalence classes: 1165243
+2025-11-20 07:20:08,525 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 07:20:08,525 - INFO - [OLA_1 tree] Time taken: 3.19 sec | Memory: 1480.40 MB
+2025-11-20 11:09:00,765 - INFO - Available RAM: 11171442688, maximum number of equivalence classes: 1117144
+2025-11-20 11:09:03,925 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 11:09:03,925 - INFO - [OLA_1 tree] Time taken: 3.16 sec | Memory: 1483.11 MB
+2025-11-20 11:10:28,768 - INFO - Available RAM: 11333820416, maximum number of equivalence classes: 1133382
+2025-11-20 11:10:31,912 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 11:10:31,913 - INFO - [OLA_1 tree] Time taken: 3.14 sec | Memory: 1514.04 MB
+2025-11-20 11:12:01,374 - INFO - Final bin widths (RF): [1, 1]
+2025-11-20 11:12:01,374 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 0.01
+2025-11-20 11:12:01,374 - INFO - [OLA_2 tree] Time taken: 92.61 sec | Memory: 1547.86 MB
+2025-11-20 11:12:16,233 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-20 11:12:16,233 - INFO - [SKALD full pipeline] Time taken: 107.46 sec | Memory: 1549.01 MB
 === SKALD Completed ===
 
-2025-11-06 17:31:00,338 - INFO - Available RAM: 5421010944, maximum number of equivalence classes: 542101
-2025-11-06 17:31:00,348 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:31:00,348 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.92 MB
-2025-11-06 17:31:00,391 - INFO - Final bin widths (RF): [1, 1]
-2025-11-06 17:31:00,391 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 15.23
-2025-11-06 17:31:00,391 - INFO - [OLA_2 tree] Time taken: 0.05 sec | Memory: 130.04 MB
-2025-11-06 17:31:00,391 - INFO - [SKALD full pipeline] Time taken: 0.05 sec | Memory: 130.04 MB
+2025-11-20 11:14:22,969 - INFO - Available RAM: 10398408704, maximum number of equivalence classes: 1039840
+2025-11-20 11:14:30,651 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 11:14:30,651 - INFO - [OLA_1 tree] Time taken: 7.68 sec | Memory: 1498.14 MB
+2025-11-20 11:18:47,003 - INFO - Available RAM: 11138793472, maximum number of equivalence classes: 1113879
+2025-11-20 11:18:54,171 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 11:18:54,171 - INFO - [OLA_1 tree] Time taken: 7.17 sec | Memory: 1332.82 MB
+2025-11-20 11:20:14,852 - INFO - Final bin widths (RF): [64, 1]
+2025-11-20 11:20:14,853 - INFO - Lowest DM*: 1012955799607, EQ Classes: 10, Supp%: 0.00
+2025-11-20 11:20:14,853 - INFO - [OLA_2 tree] Time taken: 87.85 sec | Memory: 1369.10 MB
+2025-11-20 11:20:29,236 - INFO - Generalized 'chunk_1.csv' -> 'generalized_chunk1_chunk1.csv'
+2025-11-20 11:20:29,236 - INFO - [SKALD full pipeline] Time taken: 102.23 sec | Memory: 1370.93 MB
 === SKALD Completed ===
 
-2025-11-06 17:32:24,174 - INFO - Available RAM: 5412888576, maximum number of equivalence classes: 541288
-2025-11-06 17:32:24,182 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:32:24,183 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.55 MB
-2025-11-06 17:32:24,220 - INFO - Final bin widths (RF): [1, 1]
-2025-11-06 17:32:24,220 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 15.23
-2025-11-06 17:32:24,220 - INFO - [OLA_2 tree] Time taken: 0.05 sec | Memory: 130.01 MB
-2025-11-06 17:32:24,220 - INFO - [SKALD full pipeline] Time taken: 0.05 sec | Memory: 130.01 MB
+2025-11-20 11:29:27,839 - INFO - Available RAM: 9094623232, maximum number of equivalence classes: 909462
+2025-11-20 11:29:35,109 - INFO - Initial bin widths (Ri): [1, 1]
+2025-11-20 11:29:35,109 - INFO - [OLA_1 tree] Time taken: 7.27 sec | Memory: 1330.77 MB
+2025-11-20 11:30:55,983 - INFO - Final bin widths (RF): [64, 1]
+2025-11-20 11:30:55,983 - INFO - Lowest DM*: 1012955799607, EQ Classes: 10, Supp%: 0.00
+2025-11-20 11:30:55,983 - INFO - [OLA_2 tree] Time taken: 88.14 sec | Memory: 1368.13 MB
+2025-11-20 11:30:59,564 - ERROR - Failed to generalize chunk 'chunk_1.csv' to 'generalized_chunk1_chunk1.csv': 'NoneType' object has no attribute 'columns'
+Traceback (most recent call last):
+  File "/home/Anonadmin/SKALD/k-anonymisation-SKALD/SKALD/core.py", line 355, in run_pipeline
+    generalize_first_chunk(
+  File "/home/Anonadmin/SKALD/k-anonymisation-SKALD/SKALD/generalize_chunk.py", line 31, in generalize_first_chunk
+    if col_encoded in generalized_chunk.columns:
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'columns'
+2025-11-20 11:30:59,675 - INFO - [SKALD full pipeline] Time taken: 91.84 sec | Memory: 1370.52 MB
 === SKALD Completed ===
 
-2025-11-06 17:33:49,934 - INFO - Available RAM: 5355618304, maximum number of equivalence classes: 535561
-2025-11-06 17:33:49,943 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:33:49,943 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.83 MB
-2025-11-06 17:33:49,985 - INFO - Final bin widths (RF): [1, 1]
-2025-11-06 17:33:49,985 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 15.23
-2025-11-06 17:33:49,985 - INFO - [OLA_2 tree] Time taken: 0.05 sec | Memory: 129.77 MB
-2025-11-06 17:33:49,985 - INFO - [SKALD full pipeline] Time taken: 0.05 sec | Memory: 129.77 MB
-=== SKALD Completed ===
-
-2025-11-06 17:34:27,764 - INFO - Available RAM: 5246488576, maximum number of equivalence classes: 524648
-2025-11-06 17:34:27,772 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:34:27,772 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.59 MB
-2025-11-06 17:34:27,810 - INFO - Final bin widths (RF): [1, 1]
-2025-11-06 17:34:27,810 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 15.23
-2025-11-06 17:34:27,811 - INFO - [OLA_2 tree] Time taken: 0.05 sec | Memory: 130.14 MB
-2025-11-06 17:34:27,811 - INFO - [SKALD full pipeline] Time taken: 0.05 sec | Memory: 130.14 MB
-=== SKALD Completed ===
-
-2025-11-06 17:35:34,262 - INFO - Available RAM: 5411864576, maximum number of equivalence classes: 541186
-2025-11-06 17:35:34,270 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:35:34,271 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.57 MB
-2025-11-06 17:35:34,305 - INFO - Final bin widths (RF): [1, 1]
-2025-11-06 17:35:34,305 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 15.23
-2025-11-06 17:35:34,305 - INFO - [OLA_2 tree] Time taken: 0.04 sec | Memory: 130.09 MB
-2025-11-06 17:35:34,305 - INFO - [SKALD full pipeline] Time taken: 0.04 sec | Memory: 130.09 MB
-=== SKALD Completed ===
-
-2025-11-06 17:37:03,317 - INFO - Available RAM: 5372690432, maximum number of equivalence classes: 537269
-2025-11-06 17:37:03,325 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:37:03,325 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.59 MB
-2025-11-06 17:37:03,365 - INFO - Final bin widths (RF): [1, 1]
-2025-11-06 17:37:03,365 - INFO - Lowest DM*: inf, EQ Classes: None, Supp%: 15.23
-2025-11-06 17:37:03,365 - INFO - [OLA_2 tree] Time taken: 0.05 sec | Memory: 129.90 MB
-2025-11-06 17:37:03,365 - INFO - [SKALD full pipeline] Time taken: 0.05 sec | Memory: 129.90 MB
-=== SKALD Completed ===
-
-2025-11-06 17:37:40,749 - INFO - Available RAM: 5346418688, maximum number of equivalence classes: 534641
-2025-11-06 17:37:40,759 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:37:40,759 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 128.30 MB
-2025-11-06 17:37:40,830 - INFO - Final bin widths (RF): [32, 1]
-2025-11-06 17:37:40,830 - INFO - Lowest DM*: 203184, EQ Classes: 6, Supp%: 0.00
-2025-11-06 17:37:40,830 - INFO - [OLA_2 tree] Time taken: 0.08 sec | Memory: 130.44 MB
-2025-11-06 17:37:40,830 - INFO - [SKALD full pipeline] Time taken: 0.08 sec | Memory: 130.44 MB
-=== SKALD Completed ===
-
-2025-11-06 17:38:05,219 - INFO - Available RAM: 5430337536, maximum number of equivalence classes: 543033
-2025-11-06 17:38:05,229 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:38:05,229 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.76 MB
-2025-11-06 17:38:05,275 - INFO - Final bin widths (RF): [32, 1]
-2025-11-06 17:38:05,275 - INFO - Lowest DM*: 203184, EQ Classes: 6, Supp%: 0.00
-2025-11-06 17:38:05,276 - INFO - [OLA_2 tree] Time taken: 0.06 sec | Memory: 130.08 MB
-2025-11-06 17:38:05,276 - INFO - [SKALD full pipeline] Time taken: 0.06 sec | Memory: 130.08 MB
-=== SKALD Completed ===
-
-2025-11-06 17:40:20,595 - INFO - Available RAM: 5388886016, maximum number of equivalence classes: 538888
-2025-11-06 17:40:20,603 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:40:20,603 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.98 MB
-2025-11-06 17:40:20,642 - INFO - Final bin widths (RF): [32, 1]
-2025-11-06 17:40:20,642 - INFO - Lowest DM*: 203184, EQ Classes: 6, Supp%: 0.00
-2025-11-06 17:40:20,642 - INFO - [OLA_2 tree] Time taken: 0.05 sec | Memory: 130.18 MB
-2025-11-06 17:41:03,393 - INFO - Available RAM: 5403004928, maximum number of equivalence classes: 540300
-2025-11-06 17:41:03,401 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:41:03,401 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 128.29 MB
-2025-11-06 17:41:03,454 - INFO - Final bin widths (RF): [32, 1]
-2025-11-06 17:41:03,454 - INFO - Lowest DM*: 203184, EQ Classes: 6, Supp%: 0.00
-2025-11-06 17:41:03,454 - INFO - [OLA_2 tree] Time taken: 0.06 sec | Memory: 130.29 MB
-2025-11-06 17:44:01,677 - INFO - Available RAM: 5317537792, maximum number of equivalence classes: 531753
-2025-11-06 17:44:01,686 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:44:01,686 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 128.11 MB
-2025-11-06 17:44:01,722 - INFO - Final bin widths (RF): [32, 1]
-2025-11-06 17:44:01,722 - INFO - Lowest DM*: 203184, EQ Classes: 6, Supp%: 0.00
-2025-11-06 17:44:01,722 - INFO - [OLA_2 tree] Time taken: 0.04 sec | Memory: 130.62 MB
-2025-11-06 17:45:24,671 - INFO - Available RAM: 5222625280, maximum number of equivalence classes: 522262
-2025-11-06 17:45:24,680 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:45:24,680 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.88 MB
-2025-11-06 17:45:24,724 - INFO - Final bin widths (RF): [32, 1]
-2025-11-06 17:45:24,724 - INFO - Lowest DM*: 203184, EQ Classes: 6, Supp%: 0.00
-2025-11-06 17:45:24,724 - INFO - [OLA_2 tree] Time taken: 0.05 sec | Memory: 130.14 MB
-2025-11-06 17:45:44,072 - INFO - Available RAM: 5341466624, maximum number of equivalence classes: 534146
-2025-11-06 17:45:44,082 - INFO - Initial bin widths (Ri): [1, 1]
-2025-11-06 17:45:44,082 - INFO - [OLA_1 tree] Time taken: 0.01 sec | Memory: 127.69 MB
-2025-11-06 17:45:44,128 - INFO - Final bin widths (RF): [32, 1]
-2025-11-06 17:45:44,128 - INFO - Lowest DM*: 203184, EQ Classes: 6, Supp%: 0.00
-2025-11-06 17:45:44,128 - INFO - [OLA_2 tree] Time taken: 0.06 sec | Memory: 130.08 MB
-2025-11-06 17:45:44,189 - INFO - [SKALD full pipeline] Time taken: 0.12 sec | Memory: 130.27 MB
+2025-12-02 07:18:32,515 - INFO - Available RAM: 12797259776, maximum number of equivalence classes: 1279725
+2025-12-02 07:21:45,455 - INFO - Available RAM: 13049643008, maximum number of equivalence classes: 1304964
+2025-12-02 07:21:52,549 - INFO - Initial bin widths (Ri): [1, 1]
+2025-12-02 07:21:52,549 - INFO - [OLA_1 tree] Time taken: 7.09 sec | Memory: 1343.11 MB
+2025-12-02 07:23:13,757 - INFO - Final bin widths (RF): [64, 1]
+2025-12-02 07:23:13,757 - INFO - Lowest DM*: 1012955799607, EQ Classes: 10, Supp%: 0.00
+2025-12-02 07:23:13,757 - INFO - [OLA_2 tree] Time taken: 88.30 sec | Memory: 1408.50 MB
+2025-12-02 07:23:17,374 - ERROR - Failed to generalize chunk 'chunk_1.csv' to 'generalized_chunk1_chunk1.csv': 'NoneType' object has no attribute 'columns'
+Traceback (most recent call last):
+  File "/home/Anonadmin/SKALD/k-anonymisation-SKALD/SKALD/core.py", line 355, in run_pipeline
+    generalize_first_chunk(
+  File "/home/Anonadmin/SKALD/k-anonymisation-SKALD/SKALD/generalize_chunk.py", line 31, in generalize_first_chunk
+    if col_encoded in generalized_chunk.columns:
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'NoneType' object has no attribute 'columns'
+2025-12-02 07:23:17,485 - INFO - [SKALD full pipeline] Time taken: 92.03 sec | Memory: 1410.80 MB
 === SKALD Completed ===
 

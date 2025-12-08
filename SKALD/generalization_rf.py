@@ -18,7 +18,9 @@ class OLA_2:
     the best trade-off between data utility and privacy within a suppression threshold.
     """
 
-    def __init__(self, quasi_identifiers, total_records, suppression_limit, multiplication_factors,sensitive_parameter):
+    def __init__(self, quasi_identifiers, total_records, suppression_limit,
+                multiplication_factors, sensitive_parameter,
+                enable_l_diversity=True):
         self.quasi_identifiers = quasi_identifiers
         self.sensitive_parameter = sensitive_parameter
         self.sensitive_sets = None  
@@ -31,6 +33,7 @@ class OLA_2:
         self.suppression_count = 0
         self.categorical_generalizer = CategoricalGeneralizer()
         self.domains = []
+        self.enable_l_diversity = enable_l_diversity
 
     def build_tree(self, initial_ri):
         #for i, qi in enumerate(self.quasi_identifiers):
@@ -290,17 +293,23 @@ class OLA_2:
             return 4  # default
 
     def check_k_anonymity(self, histogram, k, l):
+        # ---- k-anonymity check ----
         self.suppression_count = 0
         failing_mask = (histogram < k) & (histogram > 0)
+        
         self.suppression_count = histogram[failing_mask].sum()
+        
         if failing_mask.any():
             return False
 
-        # l-diversity check
+        # ---- l-diversity disabled → accept node ----
+        if not self.enable_l_diversity:
+            return True
+
+        # ---- l-diversity check ----
         if self.sensitive_sets is None:
             raise ValueError("Sensitive sets not initialized.")
 
-        # Ensure shapes align; if not, rebuild a same-shaped array of empty sets
         if tuple(self.sensitive_sets.shape) != tuple(histogram.shape):
             filled = np.empty_like(histogram, dtype=object)
             it = np.nditer(histogram, flags=['multi_index'])
@@ -308,12 +317,15 @@ class OLA_2:
                 filled[it.multi_index] = set()
             self.sensitive_sets = filled
 
-        # len(None) safety
-        diverse_mask = np.vectorize(lambda s: (len(s) if isinstance(s, set) else 0) >= l)(self.sensitive_sets)
-        suppressed = (~diverse_mask) & (histogram > 0)
+        diverse_mask = np.vectorize(
+            lambda s: (len(s) if isinstance(s, set) else 0) >= l
+        )(self.sensitive_sets)
 
+        suppressed = (~diverse_mask) & (histogram > 0)
         self.suppression_count += histogram[suppressed].sum()
+
         return not suppressed.any()
+
 
 
 
@@ -344,7 +356,7 @@ class OLA_2:
 
                 histogram, self.sensitive_sets = self.merge_equivalence_classes(histogram, sensitive_sets_const, node)
 
-
+                print(f"\nEvaluating Node: {list(node)}")
                 if self.node_status[tuple(node)] is not None:
                     continue
 
@@ -355,6 +367,7 @@ class OLA_2:
                     self._mark_subtree_pass(node, pbar)
                     pass_nodes.append(node)
                 else:
+                    self._print_failing_equivalence_classes(histogram, k, l,node)
                     self._mark_parents_fail(node, pbar)
 
         pbar.close()
@@ -409,6 +422,7 @@ class OLA_2:
 
             low_count_sum = np.sum(merged_hist[merged_hist < k])
             dm_star = np.sum(merged_hist[merged_hist >= k] ** 2) + low_count_sum ** 2
+
             num_eq_classes = np.sum(merged_hist > k)
             #print(merged_hist)
 
@@ -437,6 +451,7 @@ class OLA_2:
         if best_node is not None:
             print(f"\nBest Node: {list(best_node)}, Final DM*: {lowest_dm_star}")
         else:
+            
             print("No best node found.")
 
         
@@ -472,67 +487,60 @@ class OLA_2:
                 gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
 
             else:
-                col_temp = col.removesuffix("_encoded")
-                col_data = gen_chunk[col]
+                col_temp = col.removesuffix("_encoded")   # actual column name
+                col_data = gen_chunk[col]                 # encoded or real
+
                 encoding_dir = get_encoding_dir()
                 encoding_file = os.path.join(
                     encoding_dir,
                     f"{col_temp.replace(' ', '_').lower()}_encoding.json"
                 )
 
+                # --- Resolve encoded → real mapping if needed ---
                 if os.path.exists(encoding_file):
                     with open(encoding_file, "r") as f:
                         raw_map = json.load(f)
+
                     encoding_map = raw_map["encoding_map"]
-                    decoding_map = {int(v): int(k) for k, v in encoding_map.items()} if isinstance(next(iter(encoding_map.values())), int) else {v: int(k) for k, v in encoding_map.items()}
                     multiplier = raw_map.get("multiplier", 1)
 
-                    min_val = int(col_data.min())
-                    max_val = int(col_data.max())
-
-                    # ensure at least two edges
-                    step = int(max(1, bw))
-                    if min_val == max_val:
-                        bin_edges = np.array([min_val, min_val + step])
+                    # Build decoding map: encoded → real
+                    if isinstance(next(iter(encoding_map.values())), int):
+                        decoding_map = {int(v): int(k) for k, v in encoding_map.items()}
                     else:
-                        edges = list(range(min_val, max_val, step))
-                        if not edges or edges[-1] < max_val + 1:
-                            edges.append(max_val + 1)
-                        bin_edges = np.array(edges, dtype=int)
+                        decoding_map = {v: int(k) for k, v in encoding_map.items()}
 
-                    labels = []
-                    for i in range(len(bin_edges) - 1):
-                        start_enc = int(bin_edges[i])
-                        end_enc = int(bin_edges[i + 1] - 1)
-                        if i == len(bin_edges) - 2:
-                            end_enc = int(max_val)
+                    # Decode values
+                    decoded_values = col_data.map(lambda x: decoding_map.get(int(x), x))
+                    if multiplier != 1:
+                        decoded_values = decoded_values / multiplier
 
-                        if multiplier != 1:
-                            start_dec = decoding_map.get(start_enc, start_enc) / multiplier
-                            end_dec = decoding_map.get(end_enc, end_enc) / multiplier
-                        else:
-                            start_dec = decoding_map.get(start_enc, start_enc)
-                            end_dec = decoding_map.get(end_enc, end_enc)
-
-                        labels.append(f"[{start_dec}-{end_dec}]")
-
-                    gen_chunk[col_temp] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True, right=False)
-
+                    real_col_series = decoded_values.astype(float)
                 else:
-                    min_val = int(col_data.min())
-                    max_val = int(col_data.max())
-                    step = int(max(1, bw))
-                    if min_val == max_val:
-                        bin_edges = np.array([min_val, min_val + step])
-                    else:
-                        start_edge = (min_val // step) * step
-                        end_edge = ((max_val + step - 1) // step) * step + 1
-                        bin_edges = np.arange(start_edge, end_edge, step, dtype=int)
-                    labels = [f"[{int(bin_edges[i])}-{int(bin_edges[i + 1] - 1)}]" for i in range(len(bin_edges) - 1)]
-                    gen_chunk[col] = pd.cut(col_data, bins=bin_edges, labels=labels, include_lowest=True, right=False)
+                    # No encoding — use raw column
+                    real_col_series = col_data.astype(float)
+
+                # --- Build bin edges ---
+                min_val = real_col_series.min()
+                max_val = real_col_series.max()
+                step = int(max(1, bw))
+
+                if min_val == max_val:
+                    bin_edges = np.array([min_val, min_val + step])
+                else:
+                    edges = list(range(int(min_val), int(max_val), step))
+                    if not edges or edges[-1] < max_val + 1:
+                        edges.append(int(max_val + 1))
+                    bin_edges = np.array(edges, dtype=int)
+
+                # --- Create readable labels ---
+                labels = [f"[{bin_edges[i]}-{bin_edges[i+1]-1}]" for i in range(len(bin_edges)-1)]
+
+                # --- OVERWRITE ACTUAL COLUMN HERE ---
+                gen_chunk[col_temp] = pd.cut(real_col_series, bins=bin_edges,
+                                            labels=labels, include_lowest=True, right=False)
 
         return gen_chunk
-
     
     def combine_generalized_chunks_to_csv(self, generalized_chunks, output_path='generalized_chunk1.csv'):
         combined = pd.concat(generalized_chunks, ignore_index=True)
@@ -544,3 +552,72 @@ class OLA_2:
         histogram,_ = self.merge_equivalence_classes(histogram, self.sensitive_sets,list(node))
         self.suppression_count = np.sum((histogram > 0) & (histogram < k))
         return (self.suppression_count / self.total_records) * 100
+
+    def _print_failing_equivalence_classes(self, histogram, k, l,node):
+        print("\n========== Failing Equivalence Classes ==========\n")
+
+        # 1. Print histogram bins < k  (k-anonymity failures)
+        failing_k = np.argwhere((histogram > 0) & (histogram < k))
+        new_bin_widths = list(node)
+        if failing_k.size > 0:
+            print(" K-ANONYMITY FAILURES (count < k):")
+            for idx in failing_k:
+                count = histogram[tuple(idx)]
+                desc = self.describe_equivalence_class(tuple(idx), new_bin_widths)
+                print(f" {desc}  → count = {count}")
+        else:
+            print("✔ No k-anonymity failures.")
+
+        # If l-diversity is disabled, stop here
+        if not self.enable_l_diversity:
+            print("\nL-diversity disabled → skipping sensitive-set failures.\n")
+            return
+
+        # 2. L-diversity failures
+        print("\n L-DIVERSITY FAILURES:")
+        for idx in np.ndindex(histogram.shape):
+            count = histogram[idx]
+            if count == 0:
+                continue
+            sens_set = self.sensitive_sets[idx]
+            if len(sens_set) < l:
+                print(f"  Index {idx} -> count={count}, sensitive_values={sens_set}")
+
+    def describe_equivalence_class(self, idx_tuple, bin_widths):
+        """
+        Converts a histogram index into human-readable bin intervals per QI.
+        """
+        desc = []
+
+        for i, (qi, bin_w) in enumerate(zip(self.quasi_identifiers, bin_widths)):
+            dom = self.domains[i]
+            idx = idx_tuple[i]
+
+            # ---------- CATEGORICAL ----------
+            if qi.is_categorical:
+                try:
+                    value = dom[idx]
+                    desc.append(f"{qi.column_name} = {value}")
+                except Exception:
+                    desc.append(f"{qi.column_name} = <invalid_index {idx}>")
+
+            # ---------- NUMERIC ----------
+            else:
+                # numeric QI domain is the sorted list of possible values
+                try:
+                    col_min, col_max = min(dom), max(dom)
+                except Exception:
+                    desc.append(f"{qi.column_name} = <domain_error>")
+                    continue
+
+                bw = int(bin_w)
+                start = col_min + idx * bw
+                end = start + bw - 1
+
+                # clamp numeric range
+                if start < col_min: start = col_min
+                if end > col_max: end = col_max
+
+                desc.append(f"{qi.column_name} ∈ [{start}–{end}]")
+
+        return ", ".join(desc)

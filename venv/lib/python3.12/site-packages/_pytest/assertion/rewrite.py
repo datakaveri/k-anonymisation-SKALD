@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import ast
 from collections import defaultdict
+from collections.abc import Callable
+from collections.abc import Iterable
+from collections.abc import Iterator
+from collections.abc import Sequence
 import errno
 import functools
 import importlib.abc
@@ -19,12 +23,19 @@ import struct
 import sys
 import tokenize
 import types
-from typing import Callable
 from typing import IO
-from typing import Iterable
-from typing import Iterator
-from typing import Sequence
 from typing import TYPE_CHECKING
+
+
+if sys.version_info >= (3, 12):
+    from importlib.resources.abc import TraversableResources
+else:
+    from importlib.abc import TraversableResources
+if sys.version_info < (3, 11):
+    from importlib.readers import FileReader
+else:
+    from importlib.resources.readers import FileReader
+
 
 from _pytest._io.saferepr import DEFAULT_REPR_MAX_SIZE
 from _pytest._io.saferepr import saferepr
@@ -32,6 +43,7 @@ from _pytest._io.saferepr import saferepr_unlimited
 from _pytest._version import version
 from _pytest.assertion import util
 from _pytest.config import Config
+from _pytest.fixtures import FixtureFunctionDefinition
 from _pytest.main import Session
 from _pytest.pathlib import absolutepath
 from _pytest.pathlib import fnmatch_ex
@@ -54,7 +66,7 @@ assertstate_key = StashKey["AssertionState"]()
 
 # pytest caches rewritten pycs in pycache dirs
 PYTEST_TAG = f"{sys.implementation.cache_tag}-pytest-{version}"
-PYC_EXT = ".py" + (__debug__ and "c" or "o")
+PYC_EXT = ".py" + ((__debug__ and "c") or "o")
 PYC_TAIL = "." + PYTEST_TAG + PYC_EXT
 
 # Special marker that denotes we have just left a scope definition
@@ -280,7 +292,7 @@ class AssertionRewritingHook(importlib.abc.MetaPathFinder, importlib.abc.Loader)
 
         self.config.issue_config_time_warning(
             PytestAssertRewriteWarning(
-                f"Module already imported so cannot be rewritten: {name}"
+                f"Module already imported so cannot be rewritten; {name}"
             ),
             stacklevel=5,
         )
@@ -290,19 +302,8 @@ class AssertionRewritingHook(importlib.abc.MetaPathFinder, importlib.abc.Loader)
         with open(pathname, "rb") as f:
             return f.read()
 
-    if sys.version_info >= (3, 10):
-        if sys.version_info >= (3, 12):
-            from importlib.resources.abc import TraversableResources
-        else:
-            from importlib.abc import TraversableResources
-
-        def get_resource_reader(self, name: str) -> TraversableResources:
-            if sys.version_info < (3, 11):
-                from importlib.readers import FileReader
-            else:
-                from importlib.resources.readers import FileReader
-
-            return FileReader(types.SimpleNamespace(path=self._rewritten_names[name]))
+    def get_resource_reader(self, name: str) -> TraversableResources:
+        return FileReader(types.SimpleNamespace(path=self._rewritten_names[name]))  # type: ignore[arg-type]
 
 
 def _write_pyc_fp(
@@ -475,7 +476,8 @@ def _format_assertmsg(obj: object) -> str:
 
 def _should_repr_global_name(obj: object) -> bool:
     if callable(obj):
-        return False
+        # For pytest fixtures the __repr__ method provides more information than the function name.
+        return isinstance(obj, FixtureFunctionDefinition)
 
     try:
         return not hasattr(obj, "__name__")
@@ -484,7 +486,7 @@ def _should_repr_global_name(obj: object) -> bool:
 
 
 def _format_boolop(explanations: Iterable[str], is_or: bool) -> str:
-    explanation = "(" + (is_or and " or " or " and ").join(explanations) + ")"
+    explanation = "(" + ((is_or and " or ") or " and ").join(explanations) + ")"
     return explanation.replace("%", "%%")
 
 
@@ -494,7 +496,7 @@ def _call_reprcompare(
     expls: Sequence[str],
     each_obj: Sequence[object],
 ) -> str:
-    for i, res, expl in zip(range(len(ops)), results, expls):
+    for i, res, expl in zip(range(len(ops)), results, expls, strict=True):
         try:
             done = not res
         except Exception:
@@ -700,26 +702,18 @@ class AssertionRewriter(ast.NodeVisitor):
         if doc is not None and self.is_rewrite_disabled(doc):
             return
         pos = 0
-        item = None
         for item in mod.body:
-            if (
-                expect_docstring
-                and isinstance(item, ast.Expr)
-                and isinstance(item.value, ast.Constant)
-                and isinstance(item.value.value, str)
-            ):
-                doc = item.value.value
-                if self.is_rewrite_disabled(doc):
-                    return
-                expect_docstring = False
-            elif (
-                isinstance(item, ast.ImportFrom)
-                and item.level == 0
-                and item.module == "__future__"
-            ):
-                pass
-            else:
-                break
+            match item:
+                case ast.Expr(value=ast.Constant(value=str() as doc)) if (
+                    expect_docstring
+                ):
+                    if self.is_rewrite_disabled(doc):
+                        return
+                    expect_docstring = False
+                case ast.ImportFrom(level=0, module="__future__"):
+                    pass
+                case _:
+                    break
             pos += 1
         # Special case: for a decorated function, set the lineno to that of the
         # first decorator, not the `def`. Issue #4984.
@@ -728,21 +722,15 @@ class AssertionRewriter(ast.NodeVisitor):
         else:
             lineno = item.lineno
         # Now actually insert the special imports.
-        if sys.version_info >= (3, 10):
-            aliases = [
-                ast.alias("builtins", "@py_builtins", lineno=lineno, col_offset=0),
-                ast.alias(
-                    "_pytest.assertion.rewrite",
-                    "@pytest_ar",
-                    lineno=lineno,
-                    col_offset=0,
-                ),
-            ]
-        else:
-            aliases = [
-                ast.alias("builtins", "@py_builtins"),
-                ast.alias("_pytest.assertion.rewrite", "@pytest_ar"),
-            ]
+        aliases = [
+            ast.alias("builtins", "@py_builtins", lineno=lineno, col_offset=0),
+            ast.alias(
+                "_pytest.assertion.rewrite",
+                "@pytest_ar",
+                lineno=lineno,
+                col_offset=0,
+            ),
+        ]
         imports = [
             ast.Import([alias], lineno=lineno, col_offset=0) for alias in aliases
         ]
@@ -753,7 +741,7 @@ class AssertionRewriter(ast.NodeVisitor):
         nodes: list[ast.AST | Sentinel] = [mod]
         while nodes:
             node = nodes.pop()
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 self.scope = tuple((*self.scope, node))
                 nodes.append(_SCOPE_END_MARKER)
             if node == _SCOPE_END_MARKER:
@@ -1022,20 +1010,17 @@ class AssertionRewriter(ast.NodeVisitor):
                 # cond is set in a prior loop iteration below
                 self.expl_stmts.append(ast.If(cond, fail_inner, []))  # noqa: F821
                 self.expl_stmts = fail_inner
-                # Check if the left operand is a ast.NamedExpr and the value has already been visited
-                if (
-                    isinstance(v, ast.Compare)
-                    and isinstance(v.left, ast.NamedExpr)
-                    and v.left.target.id
-                    in [
-                        ast_expr.id
-                        for ast_expr in boolop.values[:i]
-                        if hasattr(ast_expr, "id")
-                    ]
-                ):
-                    pytest_temp = self.variable()
-                    self.variables_overwrite[self.scope][v.left.target.id] = v.left  # type:ignore[assignment]
-                    v.left.target.id = pytest_temp
+                match v:
+                    # Check if the left operand is an ast.NamedExpr and the value has already been visited
+                    case ast.Compare(
+                        left=ast.NamedExpr(target=ast.Name(id=target_id))
+                    ) if target_id in [
+                        e.id for e in boolop.values[:i] if hasattr(e, "id")
+                    ]:
+                        pytest_temp = self.variable()
+                        self.variables_overwrite[self.scope][target_id] = v.left  # type:ignore[assignment]
+                        # mypy's false positive, we're checking that the 'target' attribute exists.
+                        v.left.target.id = pytest_temp  # type:ignore[attr-defined]
             self.push_format_context()
             res, expl = self.visit(v)
             body.append(ast.Assign([ast.Name(res_var, ast.Store())], res))
@@ -1085,10 +1070,11 @@ class AssertionRewriter(ast.NodeVisitor):
             arg_expls.append(expl)
             new_args.append(res)
         for keyword in call.keywords:
-            if isinstance(
-                keyword.value, ast.Name
-            ) and keyword.value.id in self.variables_overwrite.get(self.scope, {}):
-                keyword.value = self.variables_overwrite[self.scope][keyword.value.id]  # type:ignore[assignment]
+            match keyword.value:
+                case ast.Name(id=id) if id in self.variables_overwrite.get(
+                    self.scope, {}
+                ):
+                    keyword.value = self.variables_overwrite[self.scope][id]  # type:ignore[assignment]
             res, expl = self.visit(keyword.value)
             new_kwargs.append(ast.keyword(keyword.arg, res))
             if keyword.arg:
@@ -1124,32 +1110,34 @@ class AssertionRewriter(ast.NodeVisitor):
     def visit_Compare(self, comp: ast.Compare) -> tuple[ast.expr, str]:
         self.push_format_context()
         # We first check if we have overwritten a variable in the previous assert
-        if isinstance(
-            comp.left, ast.Name
-        ) and comp.left.id in self.variables_overwrite.get(self.scope, {}):
-            comp.left = self.variables_overwrite[self.scope][comp.left.id]  # type:ignore[assignment]
-        if isinstance(comp.left, ast.NamedExpr):
-            self.variables_overwrite[self.scope][comp.left.target.id] = comp.left  # type:ignore[assignment]
+        match comp.left:
+            case ast.Name(id=name_id) if name_id in self.variables_overwrite.get(
+                self.scope, {}
+            ):
+                comp.left = self.variables_overwrite[self.scope][name_id]  # type: ignore[assignment]
+            case ast.NamedExpr(target=ast.Name(id=target_id)):
+                self.variables_overwrite[self.scope][target_id] = comp.left  # type: ignore[assignment]
         left_res, left_expl = self.visit(comp.left)
-        if isinstance(comp.left, (ast.Compare, ast.BoolOp)):
+        if isinstance(comp.left, ast.Compare | ast.BoolOp):
             left_expl = f"({left_expl})"
         res_variables = [self.variable() for i in range(len(comp.ops))]
         load_names: list[ast.expr] = [ast.Name(v, ast.Load()) for v in res_variables]
         store_names = [ast.Name(v, ast.Store()) for v in res_variables]
-        it = zip(range(len(comp.ops)), comp.ops, comp.comparators)
+        it = zip(range(len(comp.ops)), comp.ops, comp.comparators, strict=True)
         expls: list[ast.expr] = []
         syms: list[ast.expr] = []
         results = [left_res]
         for i, op, next_operand in it:
-            if (
-                isinstance(next_operand, ast.NamedExpr)
-                and isinstance(left_res, ast.Name)
-                and next_operand.target.id == left_res.id
-            ):
-                next_operand.target.id = self.variable()
-                self.variables_overwrite[self.scope][left_res.id] = next_operand  # type:ignore[assignment]
+            match (next_operand, left_res):
+                case (
+                    ast.NamedExpr(target=ast.Name(id=target_id)),
+                    ast.Name(id=name_id),
+                ) if target_id == name_id:
+                    next_operand.target.id = self.variable()
+                    self.variables_overwrite[self.scope][name_id] = next_operand  # type: ignore[assignment]
+
             next_res, next_expl = self.visit(next_operand)
-            if isinstance(next_operand, (ast.Compare, ast.BoolOp)):
+            if isinstance(next_operand, ast.Compare | ast.BoolOp):
                 next_expl = f"({next_expl})"
             results.append(next_res)
             sym = BINOP_MAP[op.__class__]

@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV /home/kailash/ChunKanon/venv
+set -gx VIRTUAL_ENV /home/Anonadmin/SKALD/k-anonymisation-SKALD/venv
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/"bin $PATH

@@ -25,15 +25,16 @@ def to_py_int(x):
 
 def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
     """
-    Encode all numerical columns across all chunks.
-    Safely handles reading, encoding, decimal detection, and file output.
-
+    Encode numerical columns across all chunks (only when encode=True).
+    Always computes min/max for ALL numerical QIs.
     Returns:
-        encoding_maps (dict)
+        encoding_maps: dict for encoded columns
+        dynamic_min_max: dict[min,max] for all numerical QIs
     """
 
     encoding_dir = get_encoding_dir()
     encoding_maps = {}
+    dynamic_min_max = {}
 
     if not isinstance(chunk_files, list) or not chunk_files:
         raise ValueError("chunk_files must be a non-empty list of filenames.")
@@ -41,24 +42,18 @@ def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
     if not os.path.isdir(chunk_dir):
         raise FileNotFoundError(f"Chunk directory does not exist: {chunk_dir}")
 
-    # Loop through numerical QIs
     for info in numerical_columns_info:
         col = info.get("column")
+        encode = info.get("encode", False)
+        dtype = info.get("type", "float")
+
         if not col:
             raise ValueError(f"Invalid numerical QI info (missing 'column'): {info}")
 
-        should_encode = info.get("encode", False)
-        dtype = info.get("type", "float")
+        all_vals = []               # used only if encoding
+        col_min, col_max = None, None
 
-        if not should_encode:
-            continue  # skip non-encoded columns
-
-        if dtype not in {"int", "float"}:
-            raise ValueError(f"Invalid dtype '{dtype}' for column '{col}'. Expected 'int' or 'float'.")
-
-        all_vals = []
-
-        # Read all chunks to collect values
+        # -------- scan all chunks for min/max (ALWAYS DONE) --------
         for filename in chunk_files:
             file_path = os.path.join(chunk_dir, filename)
 
@@ -67,63 +62,47 @@ def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
 
             try:
                 df = pd.read_csv(file_path)
-            except pd.errors.EmptyDataError:
-                raise ValueError(f"Chunk file '{filename}' is empty.")
             except Exception as e:
-                raise RuntimeError(f"Failed to read chunk '{filename}': {e}") from e
+                raise RuntimeError(f"Failed to read chunk '{filename}': {e}")
 
             if col not in df.columns:
                 raise KeyError(f"Column '{col}' not found in chunk '{filename}'.")
 
             vals = df[col].dropna()
 
-            # Float encoding
-            if dtype == "float":
-                try:
-                    decimals = find_max_decimal_places(vals)
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to determine decimal places for column '{col}' in chunk '{filename}': {e}"
-                    ) from e
+            # update global min/max
+            if col_min is None:
+                col_min, col_max = vals.min(), vals.max()
+            else:
+                col_min = min(col_min, vals.min())
+                col_max = max(col_max, vals.max())
 
-                try:
+            # -------- collect values ONLY for encoded columns --------
+            if encode:
+                if dtype == "float":
+                    decimals = find_max_decimal_places(vals)
                     multiplier = 10 ** decimals
                     vals = (vals * multiplier).round().astype("int64")
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to apply multiplier to float column '{col}' in chunk '{filename}': {e}"
-                    ) from e
-
-            else:
-                multiplier = 1
-                try:
+                else:
+                    multiplier = 1
                     vals = vals.astype("int64")
-                except Exception as e:
-                    raise ValueError(f"Column '{col}' contains non-integer values: {e}") from e
 
-            # Convert to python ints
-            try:
                 all_vals.extend(int(v) for v in vals.tolist())
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed converting encoded values for column '{col}' to Python int: {e}"
-                ) from e
 
-        # Build sorted uniques
-        try:
-            unique_sorted = sorted(set(all_vals))
-        except Exception as e:
-            raise RuntimeError(f"Failed sorting values for column '{col}': {e}") from e
+        # store min/max for THIS column
+        dynamic_min_max[col] = [float(col_min), float(col_max)]
 
+        # -------- skip encoding if encode=False --------
+        if not encode:
+            continue
+
+        # ===== encoding happens only below =====
+        unique_sorted = sorted(set(all_vals))
         if not unique_sorted:
-            raise ValueError(f"Column '{col}' has no non-null values across chunks; cannot encode.")
+            raise ValueError(f"Column '{col}' has no valid values to encode.")
 
-        # Build encoding + decoding maps
-        try:
-            encoding_map = {to_py_int(v): to_py_int(i + 1) for i, v in enumerate(unique_sorted)}
-            decoding_map = {to_py_int(i + 1): to_py_int(v) for i, v in enumerate(unique_sorted)}
-        except Exception as e:
-            raise RuntimeError(f"Failed building encoding maps for '{col}': {e}") from e
+        encoding_map = {int(v): i + 1 for i, v in enumerate(unique_sorted)}
+        decoding_map = {i + 1: int(v) for i, v in enumerate(unique_sorted)}
 
         encoding_maps[col] = {
             "encoding_map": encoding_map,
@@ -132,17 +111,9 @@ def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
             "type": dtype,
         }
 
-        # Write encoding JSON to file
-        try:
-            fname = f"{col.lower()}_encoding.json"
-            outpath = os.path.join(encoding_dir, fname)
+        # write encoding json
+        fname = f"{col.lower()}_encoding.json"
+        with open(os.path.join(encoding_dir, fname), "w") as f:
+            json.dump(encoding_maps[col], f, indent=4)
 
-            with open(outpath, "w") as f:
-                json.dump(encoding_maps[col], f, indent=4)
-
-        except Exception as e:
-            raise OSError(
-                f"Failed writing encoding file '{fname}' in '{encoding_dir}': {e}"
-            ) from e
-
-    return encoding_maps
+    return encoding_maps, dynamic_min_max

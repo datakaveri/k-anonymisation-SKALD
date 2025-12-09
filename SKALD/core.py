@@ -228,9 +228,9 @@ def run_pipeline(
         {"column": num_qi.column, "encode": num_qi.encode, "type": num_qi.type}
         for num_qi in config.quasi_identifiers.numerical
     ]
-    hardcoded_min_max = config.hardcoded_min_max
+
     multiplication_factors = config.size or {}
-    print("multiplication_factors:", multiplication_factors)
+    #print("multiplication_factors:", multiplication_factors)
 
     # === VALIDATE CHUNK DIRECTORY ===
     if not os.path.exists(chunk_dir_fs):
@@ -250,17 +250,18 @@ def run_pipeline(
 
     # === ENCODE NUMERICAL COLUMNS ACROSS ALL CHUNKS ===
     try:
-        encoding_maps = encode_numerical_columns(all_files, chunk_dir_fs, numerical_columns_info)
+        encoding_maps,dynamic_min_max = encode_numerical_columns(all_files, chunk_dir_fs, numerical_columns_info)
     except Exception as e:
         raise RuntimeError(f"Encoding numerical columns failed: {e}") from e
-
+    
+    print("Dynamic min/max per numerical column:", dynamic_min_max)
     # === DEFINE QUASI-IDENTIFIERS ===
     try:
         quasi_identifiers, all_quasi_columns = build_quasi_identifiers(
             numerical_columns_info,
             categorical_columns,
             encoding_maps,
-            hardcoded_min_max
+            dynamic_min_max
         )
         print("Selected quasi-identifiers:", all_quasi_columns)
     except Exception as e:
@@ -335,6 +336,7 @@ def run_pipeline(
         print("Suppressed percentage of records:", supp_percent)
     except Exception as e:
         raise RuntimeError(f"Failed computing final RF/dm*/stats: {e}") from e
+    '''
     finally:
         # Always try cleaning the encodings directory once we're done with RF computation/generalization.
         try:
@@ -344,7 +346,7 @@ def run_pipeline(
         except Exception:
             # Soft-fail on cleanup
             pass
-
+`    '''
     try:
         for idx, chunk_file in enumerate(all_files, start=1):
 
@@ -393,6 +395,7 @@ def _entry_main():
 
     
     config_root = "config"
+    '''
     if not os.path.isdir(config_root):
         raise FileNotFoundError(f"Config directory not found: {config_root}")
 
@@ -401,8 +404,8 @@ def _entry_main():
         raise FileNotFoundError(f"No config file found in '{config_root}'")
 
     CONFIG_PATH = os.path.join('config', config_files[0])
-    
-    #CONFIG_PATH = "kconfig_beneficiary.json"
+    '''
+    CONFIG_PATH = "kconfig_beneficiary.json"
     print(f"Running SKALD pipeline with config: {CONFIG_PATH}")
 
     with open(CONFIG_PATH, "r") as f:
@@ -434,7 +437,6 @@ def _entry_main():
             "l": l_conf.get("l", 1),
             "sensitive_parameter": conf.get("sensitive_parameter"),
             "size": conf.get("size", {}),
-            "hardcoded_min_max": conf.get("hardcoded_min_max", {"AGE": [0, 100]}),
             "suppression_limit": conf.get("suppression_limit", 0),
         }
 

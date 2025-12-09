@@ -82,7 +82,7 @@ class Config(BaseModel):
     quasi_identifiers: Optional[QuasiIdentifiers] = None
     sensitive_parameter: Optional[str] = None
     size: Optional[Dict[str, int]] = {}
-    hardcoded_min_max: Optional[Dict[str, List[condecimal(ge=0)]]] = {}
+
 
     @model_validator(mode="after")
     def check_k_fields(cls, values):

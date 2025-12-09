@@ -5,7 +5,7 @@ def build_quasi_identifiers(
     numerical_columns_info,
     categorical_columns,
     encoding_maps,
-    hardcoded_min_max
+    dynamic_min_max
 ):
     """
     Generates quasi-identifiers and list of column names with full error handling.
@@ -14,7 +14,7 @@ def build_quasi_identifiers(
         numerical_columns_info (list[dict])
         categorical_columns (list[str])
         encoding_maps (dict[str, dict])
-        hardcoded_min_max (dict[str, (min, max)])
+        dynamic_min_max (dict[str, (min, max)])
 
     Returns:
         (list[QuasiIdentifier], list[str])
@@ -37,8 +37,8 @@ def build_quasi_identifiers(
     if not isinstance(encoding_maps, dict):
         raise TypeError("encoding_maps must be a dictionary.")
 
-    if not isinstance(hardcoded_min_max, dict):
-        raise TypeError("hardcoded_min_max must be a dictionary.")
+    if not isinstance(dynamic_min_max, dict):
+        raise TypeError("dynamic_min_max must be a dictionary.")
 
     quasi_identifiers = []
     all_quasi_columns = []
@@ -84,26 +84,26 @@ def build_quasi_identifiers(
 
         else:
             # ---- Unencoded numerical QI must have min/max
-            if column not in hardcoded_min_max:
+            if column not in dynamic_min_max:
                 raise KeyError(
-                    f"Missing hardcoded_min_max entry for unencoded numerical column '{column}'. "
+                    f"Missing dynamic_min_max entry for unencoded numerical column '{column}'. "
                     f"Provide min/max in the configuration."
                 )
 
-            min_max = hardcoded_min_max[column]
+            min_max = dynamic_min_max[column]
             if (
                 not isinstance(min_max, (list, tuple))
                 or len(min_max) != 2
             ):
                 raise ValueError(
-                    f"hardcoded_min_max['{column}'] must be a 2-element list or tuple [min, max]."
+                    f"dynamic_min_max['{column}'] must be a 2-element list or tuple [min, max]."
                 )
 
             min_val, max_val = min_max
 
             if min_val > max_val:
                 raise ValueError(
-                    f"Invalid hardcoded_min_max for '{column}': min_val cannot be > max_val."
+                    f"Invalid dynamic_min_max for '{column}': min_val cannot be > max_val."
                 )
 
         quasi_identifiers.append(

@@ -367,7 +367,7 @@ class OLA_2:
                     self._mark_subtree_pass(node, pbar)
                     pass_nodes.append(node)
                 else:
-                    self._print_failing_equivalence_classes(histogram, k, l,node)
+                    #self._print_failing_equivalence_classes(histogram, k, l,node)
                     self._mark_parents_fail(node, pbar)
 
         pbar.close()
@@ -472,11 +472,15 @@ class OLA_2:
 
 
     def generalize_chunk(self, chunk, bin_widths):
+
         gen_chunk = chunk.copy(deep=False)
 
         for qi, bw in zip(self.quasi_identifiers, bin_widths):
             col = qi.column_name
 
+            # -------------------------
+            # HANDLE CATEGORICAL QIs
+            # -------------------------
             if qi.is_categorical:
                 level = int(bw)
                 mapping = {
@@ -485,62 +489,89 @@ class OLA_2:
                 }
                 mapper = mapping.get(qi.column_name, self.categorical_generalizer.generalize_profession)
                 gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
+                continue
 
-            else:
-                col_temp = col.removesuffix("_encoded")   # actual column name
-                col_data = gen_chunk[col]                 # encoded or real
+            # -------------------------
+            # HANDLE NUMERICAL QIs
+            # -------------------------
+            original_col = col.removesuffix("_encoded") if qi.is_encoded else col
 
-                encoding_dir = get_encoding_dir()
+            if qi.is_encoded:
+                enc_series = gen_chunk[col].astype(int)
+
                 encoding_file = os.path.join(
-                    encoding_dir,
-                    f"{col_temp.replace(' ', '_').lower()}_encoding.json"
+                    get_encoding_dir(),
+                    f"{original_col.replace(' ', '_').lower()}_encoding.json"
                 )
 
-                # --- Resolve encoded → real mapping if needed ---
-                if os.path.exists(encoding_file):
-                    with open(encoding_file, "r") as f:
-                        raw_map = json.load(f)
+                with open(encoding_file, "r") as f:
+                    raw_map = json.load(f)
 
-                    encoding_map = raw_map["encoding_map"]
-                    multiplier = raw_map.get("multiplier", 1)
+                encoding_map = raw_map["encoding_map"]
+                multiplier   = raw_map.get("multiplier", 1)
 
-                    # Build decoding map: encoded → real
-                    if isinstance(next(iter(encoding_map.values())), int):
-                        decoding_map = {int(v): int(k) for k, v in encoding_map.items()}
-                    else:
-                        decoding_map = {v: int(k) for k, v in encoding_map.items()}
+                # encoded → real value
+                decoding_map = {int(v): int(k) for k, v in encoding_map.items()}
 
-                    # Decode values
-                    decoded_values = col_data.map(lambda x: decoding_map.get(int(x), x))
-                    if multiplier != 1:
-                        decoded_values = decoded_values / multiplier
+            else:
+                enc_series = gen_chunk[col].astype(float)
+                decoding_map = None
+                multiplier = 1
 
-                    real_col_series = decoded_values.astype(float)
+            # -------------------------------
+            # BUILD BIN EDGES IN ENCODED SPACE
+            # -------------------------------
+            min_val = int(enc_series.min())
+            max_val = int(enc_series.max())
+            step = int(max(1, bw))
+
+            encoded_edges = list(range(min_val, max_val + 1, step))
+            if not qi.is_encoded :
+                encoded_edges.append(encoded_edges[-1] + step)
+            else:
+                encoded_max = decoding_map.get(max_val,max_val)
+                encoded_edges.append(encoded_max)
+            encoded_edges = np.array(encoded_edges)
+
+            # -------------------------------
+            # DECODE BIN EDGES → REAL VALUES
+            # -------------------------------
+            decoded_edges = []
+            for v in encoded_edges:
+                if decoding_map:
+                    real_v = decoding_map.get(v, v)
+                    real_v = real_v / multiplier
                 else:
-                    # No encoding — use raw column
-                    real_col_series = col_data.astype(float)
+                    real_v = v
+                decoded_edges.append(real_v)
 
-                # --- Build bin edges ---
-                min_val = real_col_series.min()
-                max_val = real_col_series.max()
-                step = int(max(1, bw))
+            decoded_edges = np.array(decoded_edges, dtype=float)
 
-                if min_val == max_val:
-                    bin_edges = np.array([min_val, min_val + step])
-                else:
-                    edges = list(range(int(min_val), int(max_val), step))
-                    if not edges or edges[-1] < max_val + 1:
-                        edges.append(int(max_val + 1))
-                    bin_edges = np.array(edges, dtype=int)
-
-                # --- Create readable labels ---
-                labels = [f"[{bin_edges[i]}-{bin_edges[i+1]-1}]" for i in range(len(bin_edges)-1)]
-
-                # --- OVERWRITE ACTUAL COLUMN HERE ---
-                gen_chunk[col_temp] = pd.cut(real_col_series, bins=bin_edges,
-                                            labels=labels, include_lowest=True, right=False)
+            # ------------------------------------
+            # BUILD LABELS FOR REAL VALUE RANGES
+            # ------------------------------------
+            labels = []
+            for i in range(len(decoded_edges) - 1):
+                left = decoded_edges[i]
+                right = decoded_edges[i + 1] - 1       # exclusive upper boundary
+                labels.append(f"[{left}-{right}]")
+            #print(f"labels for {original_col}: {labels}")
+            # ------------------------------------
+            # APPLY GENERALIZATION
+            # ------------------------------------
+            # Use actual encoded edges for binning
+            gen_chunk[original_col] = pd.cut(
+                enc_series,
+                bins=encoded_edges,
+                labels=labels,
+                include_lowest=True,
+                right=False    # ensures exclusive bins → 5–10, 11–16
+            )
 
         return gen_chunk
+
+
+
     
     def combine_generalized_chunks_to_csv(self, generalized_chunks, output_path='generalized_chunk1.csv'):
         combined = pd.concat(generalized_chunks, ignore_index=True)

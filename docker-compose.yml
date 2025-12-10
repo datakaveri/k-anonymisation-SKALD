@@ -1,0 +1,14 @@
+version: "3.8"
+
+services:
+  skald_server:
+    build: .
+    container_name: skald_server_container
+    ports:
+      - "8071:8071"
+    environment:
+      - FLASK_ENV=development
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: ["python", "SKALD_server.py", "run", "--host=0.0.0.0", "--port=8071"]

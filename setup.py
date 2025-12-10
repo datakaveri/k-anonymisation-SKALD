@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name='chunkanon',
+    name='SKALD',
     version='0.1.0',
     packages=find_packages(),
     install_requires=[
@@ -12,7 +12,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'chunkanon=chunkanon.cli:main'
+            'SKALD=SKALD.cli:main'
         ]
     },
     author='Kailash R',

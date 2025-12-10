@@ -2,3 +2,11 @@ pandas
 numpy
 tqdm
 pydantic
+pyyaml
+flask
+flask_cors
+requests
+psutil
+cryptography
+pytest
+pytest-cov  

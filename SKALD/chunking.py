@@ -1,0 +1,120 @@
+import pandas as pd
+import psutil
+import os
+import shutil
+
+def split_csv_by_ram(data_dir="data"):
+    """
+    Detects the single CSV file inside `data_dir` and splits it into chunks
+    based on ~1/4th of total system RAM.
+
+    Strong error handling added:
+    - Missing/invalid directory
+    - Missing CSV
+    - Multiple CSVs
+    - Read failures
+    - Zero-row samples
+    - Tiny CSV files
+    - Chunk writing errors
+    """
+
+    # --- Validate data directory ---
+    if not isinstance(data_dir, str):
+        raise TypeError("data_dir must be a string path.")
+    if not os.path.isdir(data_dir):
+        raise FileNotFoundError(f"Data directory does not exist: '{data_dir}'")
+
+    os.makedirs("chunks", exist_ok=True)
+    chunks_dir = "chunks"
+    try:
+        for name in os.listdir(chunks_dir):
+            path = os.path.join(chunks_dir, name)
+            if os.path.isfile(path) or os.path.islink(path):
+                os.unlink(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
+    except Exception as e:
+        raise OSError(f"Failed clearing '{chunks_dir}': {e}")
+    else:
+        print(f"Cleared any existing contents of '{chunks_dir}'")
+    # --- Find CSV file safely ---
+    try:
+        csv_files = [f for f in os.listdir(data_dir) if f.lower().endswith(".csv")]
+    except Exception as e:
+        raise OSError(f"Cannot list files in '{data_dir}': {e}")
+
+    if not csv_files:
+        raise FileNotFoundError(f"No CSV file found inside '{data_dir}'")
+    if len(csv_files) > 1:
+        raise ValueError(
+            f"More than one CSV found in '{data_dir}'. Expected exactly one. Found: {csv_files}"
+        )
+
+    input_csv = os.path.join(data_dir, csv_files[0])
+    print(f"Detected CSV: {input_csv}")
+
+    # --- Detect RAM safely ---
+    try:
+        total_ram_bytes = psutil.virtual_memory().total
+    except Exception as e:
+        raise RuntimeError(f"Unable to detect system RAM: {e}")
+
+    if total_ram_bytes <= 0:
+        raise RuntimeError("System RAM reported as zero or negative. Cannot compute chunk size.")
+
+    chunk_ram_bytes = max(total_ram_bytes // 4, 50 * 1024 * 1024)  
+    # ensure at least 50MB chunks
+
+    chunk_ram_gb = chunk_ram_bytes / (1024 ** 3)
+    print(f"Total RAM: {total_ram_bytes / (1024 ** 3):.2f} GB")
+    print(f"Using approx {chunk_ram_gb:.2f} GB per chunk")
+
+    # --- Estimate rows per chunk ---
+    try:
+        sample = pd.read_csv(input_csv, nrows=10000)
+    except Exception as e:
+        raise RuntimeError(f"Failed reading sample of CSV '{input_csv}': {e}")
+
+    if sample.empty:
+        raise ValueError(f"CSV '{input_csv}' appears empty. Cannot split an empty file.")
+
+    try:
+        avg_row_size = sample.memory_usage(index=True, deep=True).sum() / len(sample)
+    except Exception as e:
+        raise RuntimeError(f"Failed computing average row size: {e}")
+
+    if avg_row_size <= 0:
+        raise RuntimeError("Average row size computed as zero. CSV may be corrupted.")
+
+    rows_per_chunk = int(chunk_ram_bytes / avg_row_size)
+    rows_per_chunk = max(rows_per_chunk, 1000)  
+    # minimum 1000 rows per chunk
+
+    print(f"≈ {rows_per_chunk:,} rows per chunk (~{chunk_ram_gb:.2f} GB)")
+
+    # --- Stream the CSV with chunking ---
+    try:
+        reader = pd.read_csv(input_csv, chunksize=rows_per_chunk)
+    except Exception as e:
+        raise RuntimeError(f"Failed creating CSV reader for '{input_csv}': {e}")
+
+    chunk_count = 0
+
+    for i, chunk in enumerate(reader, start=1):
+        if chunk.empty:
+            print(f"[WARN] Chunk {i} is empty. Skipping.")
+            continue
+
+        out_path = os.path.join("chunks", f"chunk_{i}.csv")
+        try:
+            chunk.to_csv(out_path, index=False)
+            chunk_count += 1
+            print(f"Wrote {out_path} ({len(chunk):,} rows)")
+        except Exception as e:
+            print(f"[ERROR] Failed writing chunk {i} to '{out_path}': {e}")
+            continue
+
+    if chunk_count == 0:
+        raise RuntimeError("No chunks were generated. CSV may be too small or unreadable.")
+
+    print("Done splitting CSV into chunks.")

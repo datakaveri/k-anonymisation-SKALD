@@ -1,5 +1,4 @@
 datachunks/
-generalized_chunk1.csv
 encodings/
 log.txt
 .coverage
@@ -73,3 +72,7 @@ encoded_pins.txt
 .dockerignore
 coverage.txt
 merging.py
+datas/
+bin/
+lib64
+*.cfg

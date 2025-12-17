@@ -76,3 +76,4 @@ datas/
 bin/
 lib64
 *.cfg
+SKALD/temp/

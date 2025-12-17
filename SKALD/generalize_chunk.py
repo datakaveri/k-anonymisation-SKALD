@@ -1,8 +1,8 @@
 import pandas as pd
 import os
-from SKALD.preprocess import suppress, pseudonymize
 
-def generalize_first_chunk(chunk_file, output_path, numerical_columns_info, encoding_maps, ola_2,final_rf):
+
+def generalize_single_chunk(chunk_file, output_path, numerical_columns_info, encoding_maps, ola_2,final_rf):
     """
     Generalize the first chunk using final RF bin widths and save to CSV.
     """

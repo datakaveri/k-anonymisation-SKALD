@@ -5,6 +5,7 @@ import pandas as pd
 import itertools
 import numpy as np
 from tqdm import tqdm
+import glob
 
 from collections import defaultdict
 from SKALD.categorical import CategoricalGeneralizer
@@ -572,12 +573,49 @@ class OLA_2:
 
 
 
-    
-    def combine_generalized_chunks_to_csv(self, generalized_chunks, output_path='generalized_chunk1.csv'):
-        combined = pd.concat(generalized_chunks, ignore_index=True)
-        combined.to_csv(output_path, index=False)
-        print(f"Generalized data saved to {output_path}")
+    def combine_generalized_chunks_to_csv(self, output_directory, output_filename):
+        """
+        Combine all generalized chunk CSVs into a single CSV
+        and delete individual chunk files after successful merge.
+        """
+
+        output_directory = os.path.abspath(output_directory)
+        final_output_path = os.path.join(output_directory, output_filename)
+
+        # Find all chunk CSVs (exclude final output if it already exists)
+        csv_files = sorted(
+            f for f in glob.glob(os.path.join(output_directory, "*.csv"))
+            if os.path.abspath(f) != final_output_path
+        )
+
+        if not csv_files:
+            raise ValueError(f"No generalized chunk CSVs found in {output_directory}")
+
+        dfs = []
+        for f in csv_files:
+            try:
+                dfs.append(pd.read_csv(f))
+            except Exception as e:
+                raise RuntimeError(f"Failed to read chunk file '{f}': {e}")
+
+        combined = pd.concat(dfs, ignore_index=True)
+
+        # Write combined output
+        combined.to_csv(final_output_path, index=False)
+        print(f"✅ Combined {len(csv_files)} chunks → {final_output_path}")
+
+        # Delete chunk files ONLY after successful write
+        for f in csv_files:
+            try:
+                os.remove(f)
+            except Exception as e:
+                print(f"⚠️ Warning: failed to delete chunk file '{f}': {e}")
+
+        print(f"🧹 Deleted {len(csv_files)} intermediate chunk files")
+
         return combined
+
+
 
     def get_suppressed_percent(self, node, histogram, k):
         histogram,_ = self.merge_equivalence_classes(histogram, self.sensitive_sets,list(node))

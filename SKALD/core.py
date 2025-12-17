@@ -17,9 +17,10 @@ from SKALD.utils import format_time, log_performance
 from SKALD.config_validation import load_config
 from SKALD.encoder import encode_numerical_columns, get_encoding_dir
 from SKALD.chunk_processing import process_chunks_for_histograms
-from SKALD.generalize_chunk import generalize_first_chunk
+from SKALD.generalize_chunk import generalize_single_chunk
 from SKALD.build_QI import build_quasi_identifiers
 from SKALD.chunking import split_csv_by_ram
+from SKALD.preprocess import suppress, encrypt_columns, hash_columns, mask_columns
 
 
 class InlineListDumper(yaml.SafeDumper):
@@ -66,7 +67,7 @@ def run_pipeline(
 ) -> Tuple[object, Optional[float], Optional[float], Optional[int], Optional[dict]]:
     """
     Main SKALD pipeline: loads config, encodes QIs, builds OLA trees,
-    processes histograms, calculates final bin widths, and optionally generalizes the first chunk.
+    processes histograms, calculates final bin widths, and  generalizes the chunks and merge back them together.
 
     Returns:
         (final_rf_or_json, elapsed_time, lowest_dm_star, num_eq_classes, eq_class_stats)
@@ -74,10 +75,9 @@ def run_pipeline(
     # === LOAD CONFIGURATION ===
     config = load_config(config_path)
 
-    # Defer imports of preprocess so tests can monkeypatch SKALD.preprocess
-    from SKALD.preprocess import suppress, pseudonymize, encrypt_columns
+    
 
-    print("Running suppression + pseudonymization + encryption ")
+    print("Running suppression + hashing + encryption + masking phase...")
     output_directory = config.output_directory
 
     # Validate data directory and files
@@ -105,7 +105,7 @@ def run_pipeline(
     except Exception as e:
         raise RuntimeError(f"Failed to split CSV(s) in '{data_dir}': {e}") from e
 
-    # Process each chunk with optional suppression/pseudonymization/encryption
+    # Process each chunk with optional suppression/hashing/encryption
     try:
         chunk_dir_fs = "chunks"
         for chunk in _safe_listdir(chunk_dir_fs):
@@ -119,9 +119,14 @@ def run_pipeline(
                 print(f"Suppressing columns: {config.suppress}")
                 df = suppress(df, config.suppress)
 
-            if config.pseudonymize:
-                print(f"Pseudonymizing columns: {config.pseudonymize}")
-                df = pseudonymize(df, config.pseudonymize)
+            if config.hashing_with_salt or config.hashing_without_salt: 
+                print(f"Hashing with salt columns: {config.hashing_with_salt}")
+                df = hash_columns(df, config.hashing_with_salt, config.hashing_without_salt)
+
+            if config.masking:
+                print(f"Masking columns: {config.masking}")
+                df = mask_columns(df, config.masking)
+
 
             if config.encrypt:
                 print(f"Encrypting columns: {config.encrypt}")
@@ -162,7 +167,7 @@ def run_pipeline(
                     f.write(json_output)
                 print(f"JSON output saved at: {output_json_path}")
 
-        print("\nCompleted suppression/pseudonymization/encryption phase.")
+        print("\nCompleted suppression/hashing/encryption phase.")
     except Exception as e:
         raise RuntimeError(f"Preprocessing phase failed: {e}") from e
 
@@ -352,13 +357,12 @@ def run_pipeline(
 
             # Ensure output directory exists
             os.makedirs(output_directory, exist_ok=True)
-
             # Build output filename inside output_directory
             base_name = f"{output_path.rstrip('.csv')}_chunk{idx}.csv"
             output_file = os.path.join(output_directory, base_name)
 
             try:
-                generalize_first_chunk(
+                generalize_single_chunk(
                     chunk_file,
                     output_file,
                     numerical_columns_info,
@@ -371,6 +375,9 @@ def run_pipeline(
 
             except Exception as chunk_err:
                 print(f"Failed to generalize chunk '{chunk_file}' to '{output_file}': {chunk_err}")
+        
+        combined = ola_2.combine_generalized_chunks_to_csv(output_directory, output_path)
+        print(f"\nAll chunks combined into final output: {output_path}")
 
     except Exception as e:
         logger.exception(f"Generalization process failed: {e}")
@@ -392,10 +399,8 @@ def _entry_main():
     CLI-like entry split out for easier unit testing.
     Expects a JSON config in ./config/<first file>.json and builds a temp YAML for run_pipeline.
     """
-
-    
     config_root = "config"
-    '''
+    
     if not os.path.isdir(config_root):
         raise FileNotFoundError(f"Config directory not found: {config_root}")
 
@@ -404,8 +409,8 @@ def _entry_main():
         raise FileNotFoundError(f"No config file found in '{config_root}'")
 
     CONFIG_PATH = os.path.join('config', config_files[0])
-    '''
-    CONFIG_PATH = "kconfig_beneficiary.json"
+    
+    #CONFIG_PATH = "kconfig_beneficiary.json"
     print(f"Running SKALD pipeline with config: {CONFIG_PATH}")
 
     with open(CONFIG_PATH, "r") as f:
@@ -425,12 +430,14 @@ def _entry_main():
         yaml_config = {
             "enable_k_anonymity": conf.get("enable_k_anonymity", True),
             "enable_l_diversity": conf.get("enable_l_diversity", False),
-            "output_path": conf.get("output_path", "generalized_chunk1.csv"),
+            "output_path": conf.get("output_path", "generalized.csv"),
             "output_directory": conf.get("output_directory", "output"),
             "key_directory": conf.get("key_directory", "keys"),
             "log_file": conf.get("log_file", "log.txt"),
             "suppress": conf.get("suppress", []),
-            "pseudonymize": conf.get("pseudonymize", []),
+            "hashing_with_salt": conf.get("hashing_with_salt", []),
+            "hashing_without_salt": conf.get("hashing_without_salt", []),
+            "masking": conf.get("masking", []),
             "encrypt": conf.get("encrypt", []),
             "quasi_identifiers": conf.get("quasi_identifiers", {}),
             "k": k_conf.get("k", 1),

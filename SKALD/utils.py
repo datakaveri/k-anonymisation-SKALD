@@ -1,14 +1,16 @@
+import logging
 import os
 import json
 import psutil
 import time
 from datetime import datetime
-
-
 from tqdm import tqdm
 
+import logging
+logger = logging.getLogger("SKALD")
 
-def log_performance(logger,step_name: str, start_time: float):
+
+def log_performance(step_name: str, start_time: float):
     """Logs elapsed time and memory usage for a step."""
     process = psutil.Process(os.getpid())
     mem_mb = process.memory_info().rss / (1024 * 1024)

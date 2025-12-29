@@ -1,3 +1,7 @@
+import logging
+logger = logging.getLogger("SKALD")
+
+
 class QuasiIdentifier:
     """
     Represents a quasi-identifier column in a dataset.

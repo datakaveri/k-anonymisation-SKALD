@@ -5,8 +5,15 @@ import json
 import os
 import base64
 import secrets
+from typing import List, Dict
+import logging
+logger = logging.getLogger("SKALD")
 
-def generate_global_salt(length_bytes=32):
+
+# --------------------------------------------------
+# Utilities
+# --------------------------------------------------
+def generate_global_salt(length_bytes: int = 32) -> str:
     """
     Generates a cryptographically secure global salt.
     """
@@ -14,143 +21,161 @@ def generate_global_salt(length_bytes=32):
         secrets.token_bytes(length_bytes)
     ).decode()
 
-def suppress(dataframe, suppressed_columns):
-    """
-    Suppresses (removes) the specified columns from the dataframe.
-    """
-    dataframe.drop(columns=suppressed_columns, inplace=True, errors='ignore')
-    return dataframe
+
+# --------------------------------------------------
+# Suppression
+# --------------------------------------------------
+def suppress(dataframe: pd.DataFrame, suppressed_columns: List[str]) -> pd.DataFrame:
+    if not isinstance(suppressed_columns, list):
+        logger.error("suppressed_columns is not a list: %s", type(suppressed_columns).__name__)
+        raise TypeError("suppressed_columns must be a list")
+
+    missing = [c for c in suppressed_columns if c not in dataframe.columns]
+    if missing:
+        raise KeyError(f"Columns not found for suppression: {missing}")
+    logger.info("Suppressed columns: %s", suppressed_columns)
+    return dataframe.drop(columns=suppressed_columns)
 
 
-def hash_columns(dataframe, columns_with_salt, columns_without_salt):
-    """
-    Hashes specified columns using SHA-256.
-    Columns in 'columns_with_salt' are hashed with a salt.
-    Columns in 'columns_without_salt' are hashed without a salt.
+# --------------------------------------------------
+# Hashing
+# --------------------------------------------------
+def hash_columns(
+    dataframe: pd.DataFrame,
+    columns_with_salt: List[str],
+    columns_without_salt: List[str]
+) -> pd.DataFrame:
 
-    Args:
-        dataframe (pd.DataFrame): Input data.
-        columns_with_salt (List[str]): Columns to hash with salt.
-        columns_without_salt (List[str]): Columns to hash without salt.
-        salt (str): Salt value for hashing.
+    if not isinstance(columns_with_salt, list) or not isinstance(columns_without_salt, list):
+        logger.error("Hashing column lists are not lists: %s, %s",
+                     type(columns_with_salt).__name__,
+                     type(columns_without_salt).__name__)
+        raise TypeError("Hashing column lists must be lists")
 
-    Returns:
-        pd.DataFrame: DataFrame with hashed columns.
-    """
-
-    
-    # Hash columns with salt
+    salt = generate_global_salt() if columns_with_salt else None
+    logger.debug("Generated global salt for hashing")
     for col in columns_with_salt:
-        salt = generate_global_salt()
-        if col in dataframe.columns:
-            dataframe[col] = dataframe[col].astype(str).apply(
-                lambda x: hashlib.sha256((salt + x).encode()).hexdigest()
-            )
-        else:
-            print(f"[WARN] Column '{col}' not found in dataset — skipping.")
+        if col not in dataframe.columns:
+            raise KeyError(f"Column '{col}' not found for salted hashing")
 
-    # Hash columns without salt
+        dataframe[col] = dataframe[col].astype(str).apply(
+            lambda x: hashlib.sha256((salt + x).encode()).hexdigest()
+            if x.lower() != "nan" else x
+        )
+        logger.info("Applied salted hashing to column: %s", col)
     for col in columns_without_salt:
-        if col in dataframe.columns:
-            dataframe[col] = dataframe[col].astype(str).apply(
-                lambda x: hashlib.sha256(x.encode()).hexdigest()
-            )
-        else:
-            print(f"[WARN] Column '{col}' not found in dataset — skipping.")
+        if col not in dataframe.columns:
+            raise KeyError(f"Column '{col}' not found for hashing")
 
+        dataframe[col] = dataframe[col].astype(str).apply(
+            lambda x: hashlib.sha256(x.encode()).hexdigest()
+            if x.lower() != "nan" else x
+        )
+        logger.info("Applied hashing to column: %s", col)
     return dataframe
 
 
-def encrypt_columns(dataframe, columns_to_encrypt, key_dir="keys"):
-    """
-    Encrypts each specified column with Fernet encryption.
-    If a column already has a key in 'column_keys.json', reuse it; 
-    otherwise generate and append a new one.
+# --------------------------------------------------
+# Encryption
+# --------------------------------------------------
+def encrypt_columns(
+    dataframe: pd.DataFrame,
+    columns_to_encrypt: List[str],
+    output_directory: str
+) -> pd.DataFrame:
 
-    Args:
-        dataframe (pd.DataFrame): Input data.
-        columns_to_encrypt (List[str]): Columns to encrypt.
-        key_dir (str): Directory to store encryption keys.
+    if not isinstance(columns_to_encrypt, list):
+        logger.error("columns_to_encrypt is not a list: %s", type(columns_to_encrypt).__name__)
+        raise TypeError("columns_to_encrypt must be a list")
 
-    Returns:
-        pd.DataFrame: DataFrame with encrypted columns.
-    """
-    os.makedirs(key_dir, exist_ok=True)
-    key_file = os.path.join(key_dir, "column_keys.json")
+    os.makedirs(output_directory, exist_ok=True)
+    key_file = os.path.join(output_directory, "symmetric_keys.json")
 
-    # Load existing key map if available
+    # Load existing keys
     if os.path.exists(key_file):
-        with open(key_file, "r") as f:
-            try:
+        try:
+            with open(key_file, "r") as f:
                 key_map = json.load(f)
-            except json.JSONDecodeError:
-                key_map = {}
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"Corrupted key file '{key_file}': {e}")
     else:
         key_map = {}
 
-    # Encrypt specified columns
     for col in columns_to_encrypt:
         if col not in dataframe.columns:
-            print(f"[WARN] Column '{col}' not found in dataset — skipping.")
-            continue
+            raise KeyError(f"Column '{col}' not found for encryption")
 
-        # Reuse existing key if present, otherwise generate new one
+        # Get or create key
         if col in key_map:
             key = key_map[col].encode()
-            print(f"[INFO] Reusing existing key for column '{col}'")
         else:
             key = Fernet.generate_key()
             key_map[col] = key.decode()
-            print(f"[INFO] Generated new key for column '{col}'")
 
         fernet = Fernet(key)
 
-        # Encrypt values (convert to str, handle NaNs)
-        dataframe[col] = dataframe[col].astype(str).apply(
-            lambda x: fernet.encrypt(x.encode()).decode() if x.lower() != 'nan' else x
-        )
+        try:
+            dataframe[col] = dataframe[col].astype(str).apply(
+                lambda x: fernet.encrypt(x.encode()).decode()
+                if x.lower() != "nan" else x
+            )
+        except Exception as e:
+            raise RuntimeError(f"Encryption failed for column '{col}': {e}")
+        logger.info("Encrypted column: %s", col)
+    # Persist keys atomically
+    tmp_key_file = key_file + ".tmp"
+    try:
+        with open(tmp_key_file, "w") as f:
+            json.dump(key_map, f, indent=4)
+        os.replace(tmp_key_file, key_file)
+    except Exception as e:
+        raise OSError(f"Failed to write encryption key file: {e}")
 
-    # Save updated key map
-    with open(key_file, "w") as f:
-        json.dump(key_map, f, indent=4)
-
-    print(f"[INFO] Encryption keys saved to: {key_file}")
     return dataframe
 
-def mask_columns(dataframe, masking_info):
-    """
-    Masks specified columns based on provided masking information.
 
-    Args:
-        dataframe (pd.DataFrame): Input data.
-        masking_info (List[Dict]): List of masking configurations.
+# --------------------------------------------------
+# Masking
+# --------------------------------------------------
+def mask_columns(dataframe: pd.DataFrame, masking_info: List[Dict]) -> pd.DataFrame:
+    if not isinstance(masking_info, list):
+        logger.error("masking_info is not a list: %s", type(masking_info).__name__)
+        raise TypeError("masking_info must be a list of dictionaries")
 
-    Returns:
-        pd.DataFrame: DataFrame with masked columns.
-    """
     for mask in masking_info:
+        if not isinstance(mask, dict):
+            raise ValueError("Each masking entry must be a dictionary")
+
         column = mask.get("column")
-        start_digits = mask.get("start_digits", 0)
-        end_digits = mask.get("end_digits", 0)
-        masking_character = mask.get("masking_character", "*")
+        if not column:
+            raise ValueError("Masking config missing 'column'")
 
         if column not in dataframe.columns:
-            print(f"[WARN] Column '{column}' not found in dataset — skipping.")
-            continue
+            raise KeyError(f"Column '{column}' not found for masking")
+
+        start_digits = int(mask.get("start_digits", 0))
+        end_digits = int(mask.get("end_digits", 0))
+        masking_character = mask.get("masking_character", "*")
+
+        if start_digits < 0 or end_digits < 0:
+            raise ValueError("start_digits and end_digits must be non-negative")
+
+        if end_digits < start_digits:
+            raise ValueError("end_digits cannot be less than start_digits")
 
         def mask_value(value):
-            str_value = str(value)
-            if len(str_value) <= start_digits + end_digits:
-                return masking_character * len(str_value)
+            s = str(value)
+            end_digits_final = min(end_digits, len(s))
+            if len(s) <= start_digits:
+                logger.log("Value too short to mask: %s returning the actual value", s)
+                return s
+            
             return (
-                str_value[:start_digits] +
-                masking_character * (len(str_value) - start_digits - end_digits) +
-                str_value[-end_digits:]
+                s[:start_digits-1] +
+                masking_character * (end_digits_final - start_digits + 1) +
+                s[end_digits_final:]
             )
 
         dataframe[column] = dataframe[column].apply(mask_value)
-
+        logger.info("Masked column: %s", column)
     return dataframe
-
-
-

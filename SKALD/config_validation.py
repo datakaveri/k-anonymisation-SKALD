@@ -70,7 +70,9 @@ class Config(BaseModel):
     suppression_limit: Optional[condecimal(ge=0, le=1)] = 0
 
     suppress: List[str] = Field(default_factory=list)
-    pseudonymize: List[str] = Field(default_factory=list)
+    hashing_with_salt: List[str] = Field(default_factory=list)
+    hashing_without_salt: List[str] = Field(default_factory=list)
+    masking: List[Dict] = Field(default_factory=list)
     encrypt: List[str] = Field(default_factory=list)
     enable_k_anonymity: bool = True
     enable_l_diversity: bool = False

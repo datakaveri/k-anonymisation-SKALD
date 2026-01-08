@@ -18,7 +18,7 @@ from SKALD.generalization_ri import OLA_1
 from SKALD.generalization_rf import OLA_2
 from SKALD.utils import format_time, log_performance
 from SKALD.config_validation import load_config
-from SKALD.encoder import encode_numerical_columns
+from SKALD.encoder import  encode_numerical_columns
 from SKALD.chunk_processing import process_chunks_for_histograms
 from SKALD.generalize_chunk import generalize_single_chunk
 from SKALD.build_QI import build_quasi_identifiers
@@ -244,15 +244,15 @@ def run_pipeline(
     # ------------------------------------------------------------------
     categorical_columns = [q.column for q in config.quasi_identifiers.categorical]
     numerical_columns_info = [
-        {"column": q.column, "encode": q.encode, "type": q.type}
+        {"column": q.column, "scale": q.scale, "s": q.s, "encode": q.encode, "type": q.type}
         for q in config.quasi_identifiers.numerical
     ]
 
     # ------------------------------------------------------------------
-    # 7. Encode numericals
+    # 7. Scale & Encode numericals
     # ------------------------------------------------------------------
     try:
-        encoding_maps, dynamic_min_max = encode_numerical_columns(
+        encoding_maps, dynamic_min_max =encode_numerical_columns(
             chunk_files, chunk_dir, numerical_columns_info
         )
     except Exception as e:
@@ -278,7 +278,7 @@ def run_pipeline(
             message="Failed to build quasi-identifiers",
             details=str(e)
         )
-
+    logger.info("Built quasi-identifiers for generalization")
     # ------------------------------------------------------------------
     # 9. OLA-1 (Ri)
     # ------------------------------------------------------------------
@@ -296,6 +296,7 @@ def run_pipeline(
         ola_1.build_tree()
         ola_1.find_smallest_passing_ri()
         initial_ri = ola_1.get_optimal_ri()
+        logger.info("Completed OLA-1; initial Ri: %s", initial_ri)
     except Exception as e:
         raise SKALDError(
             code="GENERALIZATION_FAILED",
@@ -465,8 +466,8 @@ def _entry_main() -> str:
         "masking": conf.get("masking", []),
         "encrypt": conf.get("encrypt", []),
         "quasi_identifiers": conf.get("quasi_identifiers", {}),
-        "k": conf.get("k", 1),
-        "l": conf.get("l", 1),
+        "k": conf.get("k_anonymize", {}).get("k", 1),
+        "l": conf.get("l_diversify", {}).get("l", 1),
         "sensitive_parameter": conf.get("sensitive_parameter"),
         "size": conf.get("size", {}),
         "suppression_limit": conf.get("suppression_limit", 0),

@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import pandas as pd
 import json
 from typing import List, Dict, Tuple
@@ -82,6 +83,10 @@ def encode_numerical_columns(
                 raise KeyError(f"Column '{col}' not found in chunk '{filename}'")
 
             vals = df[col].dropna()
+            if info.get("scale", False):
+                s = int(info.get("s", 0))
+                vals = np.floor(vals / (10 ** s))
+
             if vals.empty:
                 continue
 
@@ -90,15 +95,9 @@ def encode_numerical_columns(
             col_max = vals.max() if col_max is None else max(col_max, vals.max())
 
             # Collect values for encoding
-            if encode:
-                if dtype == "float":
-                    decimals = find_max_decimal_places(vals)
-                    multiplier = 10 ** decimals
-                    vals = (vals * multiplier).round().astype("int64")
-                else:
-                    vals = vals.astype("int64")
+            vals = vals.astype("int64")
 
-                all_vals.extend(vals.tolist())
+            all_vals.extend(vals.tolist())
 
         # --------------------------------------------------
         # Validate min/max
@@ -106,12 +105,14 @@ def encode_numerical_columns(
         if col_min is None or col_max is None:
             raise ValueError(f"Column '{col}' has no valid numeric values")
 
-        dynamic_min_max[col] = [float(col_min), float(col_max)]
+        
+
 
         # --------------------------------------------------
         # Skip encoding if not required
         # --------------------------------------------------
         if not encode:
+            dynamic_min_max[col] = [col_min, col_max]
             continue
 
         if not all_vals:
@@ -144,5 +145,9 @@ def encode_numerical_columns(
             os.replace(tmp_file, encoding_file)
         except Exception as e:
             raise OSError(f"Failed to write encoding file for '{col}': {e}")
+        encoded_min = min(encoding_map.values())
+        encoded_max = max(encoding_map.values())
+        dynamic_min_max[col] = [encoded_min, encoded_max]
 
+        
     return encoding_maps, dynamic_min_max

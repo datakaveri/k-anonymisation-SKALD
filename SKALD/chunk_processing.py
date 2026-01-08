@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 from typing import List
 import logging
 logger = logging.getLogger("SKALD")
@@ -62,59 +63,106 @@ def process_chunks_for_histograms(
         working_chunk = chunk.copy()
 
         # -----------------------------
-        # Apply numerical encoding (STRICT)
+        # Apply numerical scaling and encoding 
         # -----------------------------
         for info in numerical_columns_info:
             column = info.get("column")
+            scale = info.get("scale", False)
+            s = int(info.get("s", 0)) if scale else 0
             encode = info.get("encode", False)
             col_type = info.get("type")
 
-            if encode:
-                if column not in working_chunk.columns:
-                    raise KeyError(
-                        f"Column '{column}' missing in chunk '{filename}' during encoding"
-                    )
-
-                if column not in encoding_maps:
-                    raise KeyError(
-                        f"Encoding map missing for encoded column '{column}'"
-                    )
-
-                enc_info = encoding_maps[column]
-                enc_map = enc_info.get("encoding_map")
-                multiplier = enc_info.get("multiplier", 1)
-
-                if not isinstance(enc_map, dict) or not enc_map:
-                    raise ValueError(
-                        f"Invalid encoding_map for column '{column}'"
-                    )
-
-                try:
-                    if col_type == "float":
-                        values = (working_chunk[column] * multiplier).round().astype(int)
-                        logger.info("Applied float encoding for column '%s' with multiplier %s", column, multiplier)
+            # -----------------------------
+            # Scaling
+            # -----------------------------
+            if scale:
+                if col_type == "int":
+                    if s < 0:
+                        raise ValueError("s must be a non-negative integer for integer scaling")
                     else:
+                        scaled = np.floor(working_chunk[column] / (10 ** s)).astype(int)
+                        if encode:
+                            enc_info = encoding_maps[column]
+                            enc_map = enc_info.get("encoding_map")
+                            values = scaled.astype(int)
+                            encoded = values.map(enc_map)
+                            working_chunk[f"{column}_scaled_encoded"] = encoded
+                        else:
+                            values = scaled.astype(int)
+                            working_chunk[f"{column}_scaled"] = values
+
+                else:
+                    if s <= 0:
+                        if not encode:
+                            raise ValueError(
+                                f"Scaling with non-positive s not allowed for float column '{column}' without encoding"
+                            )
+                        else:
+                            scaled = np.floor(working_chunk[column] / (10 ** s))
+                            enc_info = encoding_maps[column]
+                            enc_map = enc_info.get("encoding_map")
+                            values = scaled.astype(int)
+                            encoded = values.map(enc_map)
+                            working_chunk[f"{column}_scaled_encoded"] = encoded 
+                    else:
+                        scaled = np.floor(working_chunk[column] / (10 ** s))
+                        if encode:
+                            enc_info = encoding_maps[column]
+                            enc_map = enc_info.get("encoding_map")
+                            values = scaled.astype(int)
+                            encoded = values.map(enc_map)
+                            working_chunk[f"{column}_scaled_encoded"] = encoded
+                        else:
+                            values = scaled.astype(int)
+                            working_chunk[f"{column}_scaled"] = values
+
+            else:
+                if encode:
+                    if column not in working_chunk.columns:
+                        raise KeyError(
+                            f"Column '{column}' missing in chunk '{filename}' during encoding"
+                        )
+
+                    if column not in encoding_maps:
+                        raise KeyError(
+                            f"Encoding map missing for encoded column '{column}'"
+                        )
+
+                    enc_info = encoding_maps[column]
+                    enc_map = enc_info.get("encoding_map")
+
+                    if not isinstance(enc_map, dict) or not enc_map:
+                        raise ValueError(
+                            f"Invalid encoding_map for column '{column}'"
+                        )
+
+                    try:
                         values = working_chunk[column].astype(int)
+                        encoded = values.map(enc_map)
                         logger.info("Applied integer encoding for column '%s'", column)
-                except Exception as e:
-                    raise ValueError(
-                        f"Failed converting values for encoding column '{column}': {e}"
-                    )
+                    except Exception as e:
+                        raise ValueError(
+                            f"Failed converting values for encoding column '{column}': {e}"
+                        )
 
-                encoded = values.map(enc_map)
+                    if encoded.isna().any():
+                        raise ValueError(
+                            f"Found values in '{column}' not present in encoding_map"
+                        )
 
-                if encoded.isna().any():
-                    raise ValueError(
-                        f"Found values in '{column}' not present in encoding_map"
-                    )
+                    working_chunk[f"{column}_encoded"] = encoded
 
-                working_chunk[f"{column}_encoded"] = encoded
-
+        # Persist scaled / encoded columns for later generalization
+        working_chunk.to_csv(file_path, index=False)
         # -----------------------------
         # Build histogram (STRICT)
         # -----------------------------
+
+    for filename in chunk_files:
+        file_path = os.path.join(chunk_dir, filename)
+        chunk = pd.read_csv(file_path)
         try:
-            histogram = ola_2.process_chunk(working_chunk, initial_ri)
+            histogram = ola_2.process_chunk(chunk, initial_ri)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to build histogram for chunk '{filename}': {e}"

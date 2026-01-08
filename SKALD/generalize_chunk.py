@@ -2,8 +2,10 @@
 
 import os
 import pandas as pd
+import numpy as np
 from SKALD.SKALDError import SKALDError
 import logging
+
 logger = logging.getLogger("SKALD")
 
 
@@ -32,6 +34,7 @@ def generalize_single_chunk(
         )
 
     chunk_path = os.path.join(chunk_dir, chunk_file)
+
     if not os.path.isfile(chunk_path):
         raise SKALDError(
             code="DATA_MISSING",
@@ -40,7 +43,7 @@ def generalize_single_chunk(
         )
 
     # -------------------------
-    # Read chunk safely
+    # Read chunk
     # -------------------------
     try:
         chunk = pd.read_csv(chunk_path)
@@ -59,54 +62,40 @@ def generalize_single_chunk(
         )
 
     working_chunk = chunk.copy()
+    s_list = []
 
     # -------------------------
-    # Apply encoding if needed
+    # Apply numerical scaling and encoding
     # -------------------------
     for info in numerical_columns_info:
-        column = info.get("column")
+        column = info["column"]
+        scale  = info.get("scale", False)
         encode = info.get("encode", False)
+        s = int(info.get("s", 0)) if scale else 0
 
-        if not encode:
-            continue
 
-        if column not in working_chunk.columns:
-            raise SKALDError(
-                code="DATA_MISSING",
-                message=f"Numerical column '{column}' missing in chunk",
-                suggested_fix="Verify input dataset columns"
+        if encode:
+            encoded_col = (
+                f"{column}_scaled_encoded" if scale else f"{column}_encoded"
             )
 
-        if column not in encoding_maps:
-            raise SKALDError(
-                code="ENCODING_FAILED",
-                message=f"Encoding map missing for column '{column}'",
-                suggested_fix="Enable encoding and rerun pipeline"
-            )
+            if encoded_col not in working_chunk.columns:
+                raise SKALDError(
+                    code="ENCODING_FAILED",
+                    message=f"Missing encoded column '{encoded_col}' during generalization",
+                    suggested_fix="Ensure encoding is applied before generalization"
+                )
 
-        try:
-            enc_map = encoding_maps[column]["encoding_map"]
-            multiplier = encoding_maps[column].get("multiplier", 1)
+    s_list.append(s)
 
-            if info.get("type") == "float":
-                encoded = (working_chunk[column] * multiplier).round().astype(int)
-            else:
-                encoded = working_chunk[column].astype(int)
-
-            working_chunk[f"{column}_encoded"] = encoded.map(enc_map)
-
-        except Exception as e:
-            raise SKALDError(
-                code="ENCODING_FAILED",
-                message=f"Failed to encode column '{column}'",
-                details=str(e)
-            )
 
     # -------------------------
     # Generalize using OLA_2
     # -------------------------
     try:
-        generalized_chunk = ola_2.generalize_chunk(working_chunk, final_rf)
+        generalized_chunk = ola_2.generalize_chunk(
+            working_chunk, final_rf, s_list
+        )
     except Exception as e:
         raise SKALDError(
             code="GENERALIZATION_FAILED",
@@ -115,16 +104,17 @@ def generalize_single_chunk(
         )
 
     # -------------------------
-    # Drop encoded columns
+    # Drop intermediate columns
     # -------------------------
     for info in numerical_columns_info:
-        if info.get("encode", False):
-            col = f"{info['column']}_encoded"
+        base = info["column"]
+        for suffix in ["_scaled_encoded", "_scaled", "_encoded"]:
+            col = f"{base}{suffix}"
             if col in generalized_chunk.columns:
                 generalized_chunk.drop(columns=[col], inplace=True)
 
     # -------------------------
-    # Write output safely
+    # Write output
     # -------------------------
     try:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -137,3 +127,5 @@ def generalize_single_chunk(
         )
 
     return output_path
+
+

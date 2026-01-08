@@ -15,6 +15,8 @@ logger = logging.getLogger("SKALD")
 # -------------------------------
 class NumericalQuasiIdentifier(BaseModel):
     column: str
+    scale: bool
+    s: Optional[int] = 0
     encode: bool
     type: str
 
@@ -25,7 +27,7 @@ class NumericalQuasiIdentifier(BaseModel):
             raise ValueError("type must be 'int' or 'float'")
         logger.debug("Validated numerical QI type: %s", v)
         return v
-
+    '''
     @model_validator(mode="before")
     def check_encode_for_float(cls, values):
         if not isinstance(values, dict):
@@ -37,7 +39,7 @@ class NumericalQuasiIdentifier(BaseModel):
             raise ValueError("Float numerical QIs must have encode=True")
         logger.debug("Validated numerical QI encoding requirement: %s", values)
         return values
-
+    '''
 
 # -------------------------------
 # Categorical QI

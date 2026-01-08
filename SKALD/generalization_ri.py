@@ -86,6 +86,15 @@ class OLA_1:
                 num_classes *= math.ceil(rng / bw)
 
         return math.ceil(num_classes)
+    def get_base_column_name(self,col_name: str) -> str:
+        if col_name.endswith("_scaled_encoded"):
+            return col_name[:-15]
+        elif col_name.endswith("_encoded"):
+            return col_name[:-8]
+        elif col_name.endswith("_scaled"):
+            return col_name[:-7]
+        else:
+            return col_name
 
     # ------------------------------------------------------------------
     # Tree construction
@@ -115,7 +124,8 @@ class OLA_1:
                             new_node[i] += 1
 
                     else:
-                        col = qi.column_name[:-8] if qi.is_encoded else qi.column_name
+                        col = self.get_base_column_name(qi.column_name)
+
                         if col not in self.multiplication_factors:
                             raise KeyError(
                                 f"Missing multiplication factor for '{col}'"
@@ -180,7 +190,7 @@ class OLA_1:
             raise ValueError(
                 "No generalization satisfies equivalence class constraint"
             )
-        self.smallest_passing_ri = min(passing)
+        self.smallest_passing_ri = [int(x) for x in min(passing)]
 
     # ------------------------------------------------------------------
     # Result accessors

@@ -28,7 +28,6 @@ __pycache__/
 *.json
 *.yaml
 *.html
-tests/
 notebooks/
 docs/
 .git/
@@ -54,7 +53,10 @@ models/
 saved_models/
 scripts/
 temp/
-tests/
+tests/.pytest_cache/
+tests/test_data/
+tests/pytest.ini
+tests/__pycache__/
 venv/
 .DS_Store
 keys/
@@ -73,3 +75,4 @@ encoded_pins.txt
 .dockerignore
 coverage.txt
 merging.py
+bin/

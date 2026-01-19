@@ -1,109 +1,130 @@
 import os
 import pandas as pd
+from typing import List
+import logging
+logger = logging.getLogger("SKALD")
 
 
 def process_chunks_for_histograms(
-    chunk_files,
-    chunk_dir,
-    numerical_columns_info,
-    encoding_maps,
+    chunk_files: List[str],
+    chunk_dir: str,
+    numerical_columns_info: list,
+    encoding_maps: dict,
     ola_2,
-    initial_ri
+    initial_ri: list,
 ):
     """
-    Process each chunk safely:
-    - Reads chunk
-    - Applies encoding if needed
-    - Builds histogram using OLA_2
-    Returns list of histograms.
+    Process chunks and build histograms using OLA_2.
 
-    Errors are caught per file, logged, and skipped
-    instead of crashing the full pipeline.
+    Rules:
+    - I/O errors → skip chunk
+    - Configuration / encoding errors → fail fast
+    - At least one histogram must be produced
+
+    Raises:
+        TypeError, FileNotFoundError, ValueError, RuntimeError
     """
 
-    histograms = []
-
-    if not isinstance(chunk_files, list):
-        raise TypeError("chunk_files must be a list of filenames.")
+    if not isinstance(chunk_files, list) or not chunk_files:
+        raise ValueError("chunk_files must be a non-empty list")
 
     if not os.path.isdir(chunk_dir):
         raise FileNotFoundError(f"Chunk directory does not exist: {chunk_dir}")
 
-    for i, filename in enumerate(chunk_files):
+    if not isinstance(initial_ri, list) or not all(isinstance(v, int) and v > 0 for v in initial_ri):
+        raise ValueError("initial_ri must be a list of positive integers")
+
+    histograms = []
+
+    for filename in chunk_files:
         file_path = os.path.join(chunk_dir, filename)
 
-        # --- Robust file validation ---
-        if not os.path.exists(file_path):
-            print(f"[WARN] Chunk file missing: {file_path}. Skipping.")
+        # -----------------------------
+        # I/O validation (skippable)
+        # -----------------------------
+        if not os.path.isfile(file_path):
             continue
 
         try:
             if os.path.getsize(file_path) == 0:
-                print(f"[WARN] Chunk file is empty: {file_path}. Skipping.")
                 continue
-        except Exception as e:
-            print(f"[ERROR] Could not check size of {file_path}: {e}")
+        except OSError:
             continue
 
-        # --- Read CSV safely ---
         try:
             chunk = pd.read_csv(file_path)
-        except Exception as e:
-            print(f"[ERROR] Failed to read CSV {file_path}: {e}. Skipping.")
+        except Exception:
             continue
 
         if chunk.empty:
-            print(f"[WARN] Chunk {file_path} is empty after read. Skipping.")
             continue
 
         working_chunk = chunk.copy()
 
-        # --- Apply numeric encoding ---
+        # -----------------------------
+        # Apply numerical encoding (STRICT)
+        # -----------------------------
         for info in numerical_columns_info:
             column = info.get("column")
             encode = info.get("encode", False)
-            col_type = info.get("type", "float")
+            col_type = info.get("type")
 
             if encode:
-                if column not in chunk.columns:
-                    print(f"[WARN] Missing column '{column}' in chunk {filename}. Skipping encoding for this column.")
-                    continue
+                if column not in working_chunk.columns:
+                    raise KeyError(
+                        f"Column '{column}' missing in chunk '{filename}' during encoding"
+                    )
 
                 if column not in encoding_maps:
-                    print(f"[ERROR] Encoding map missing for column '{column}'. Skipping this encoding.")
-                    continue
+                    raise KeyError(
+                        f"Encoding map missing for encoded column '{column}'"
+                    )
 
-                enc_map = encoding_maps[column].get("encoding_map", {})
-                multiplier = encoding_maps[column].get("multiplier", 1)
+                enc_info = encoding_maps[column]
+                enc_map = enc_info.get("encoding_map")
+                multiplier = enc_info.get("multiplier", 1)
+
+                if not isinstance(enc_map, dict) or not enc_map:
+                    raise ValueError(
+                        f"Invalid encoding_map for column '{column}'"
+                    )
 
                 try:
                     if col_type == "float":
                         values = (working_chunk[column] * multiplier).round().astype(int)
+                        logger.info("Applied float encoding for column '%s' with multiplier %s", column, multiplier)
                     else:
                         values = working_chunk[column].astype(int)
-
-                    encoded = values.map(enc_map)
-
-                    if encoded.isna().any():
-                        print(f"[WARN] Some values in '{column}' not found in encoding map. They will become NaN.")
-
-                    working_chunk[f"{column}_encoded"] = encoded
-
+                        logger.info("Applied integer encoding for column '%s'", column)
                 except Exception as e:
-                    print(f"[ERROR] Failed to encode column '{column}' in {filename}: {e}")
-                    continue
+                    raise ValueError(
+                        f"Failed converting values for encoding column '{column}': {e}"
+                    )
 
-        # --- Build histogram using OLA_2 ---
+                encoded = values.map(enc_map)
+
+                if encoded.isna().any():
+                    raise ValueError(
+                        f"Found values in '{column}' not present in encoding_map"
+                    )
+
+                working_chunk[f"{column}_encoded"] = encoded
+
+        # -----------------------------
+        # Build histogram (STRICT)
+        # -----------------------------
         try:
-            chunk_histogram = ola_2.process_chunk(working_chunk, initial_ri)
-            histograms.append(chunk_histogram)
+            histogram = ola_2.process_chunk(working_chunk, initial_ri)
         except Exception as e:
-            print(f"[ERROR] OLA_2 failed to process chunk {filename}: {e}")
-            continue
+            raise RuntimeError(
+                f"Failed to build histogram for chunk '{filename}': {e}"
+            )
 
-        print(f"Processed chunk {i+1}/{len(chunk_files)} for histograms.")
+        histograms.append(histogram)
 
     if not histograms:
-        raise ValueError("No valid histograms produced from chunks. Check input data.")
+        raise ValueError(
+            "No valid histograms produced. All chunks were empty or unreadable."
+        )
 
     return histograms

@@ -7,7 +7,6 @@ import configparser
 import os
 import sys
 import yaml
-
 from SKALD_main import main_process 
 
     

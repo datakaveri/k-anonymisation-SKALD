@@ -77,3 +77,14 @@ bin/
 lib64
 *.cfg
 SKALD/temp/
+*.bin
+*.o
+*.d
+*.exe
+*.dll
+*.so
+*.dylib
+*.lib
+*.rlib
+SKALD/.env
+SKALD/skald_ola2/target/

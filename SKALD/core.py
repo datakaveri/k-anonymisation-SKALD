@@ -9,6 +9,7 @@ import numpy as np
 from typing import List, Tuple, Optional
 import tempfile
 import yaml
+import math
 
 
 # ------------------------
@@ -20,7 +21,8 @@ from SKALD.utils import format_time, log_performance
 from SKALD.config_validation import load_config
 from SKALD.encoder import encode_numerical_columns
 from SKALD.chunk_processing import process_chunks_for_histograms
-from SKALD.generalize_chunk import generalize_single_chunk
+from SKALD.chunk_generalizer import ChunkGeneralizer
+from SKALD.chunk_generalizer import generalize_single_chunk
 from SKALD.build_QI import build_quasi_identifiers
 from SKALD.chunking import split_csv_by_ram
 from SKALD.preprocess import suppress, encrypt_columns, hash_columns, mask_columns
@@ -43,7 +45,8 @@ ERROR_FIXES = {
     "GENERALIZATION_FAILED": "Check bin widths and quasi-identifier definitions",
     "INTERNAL_ERROR": "Check logs for stack trace"
 }
-
+def compute_max_levels(max_bin_width: int) -> int:
+    return math.ceil(math.log2(max_bin_width)) + 1
 
 # ------------------------------------------------------------------
 # Helpers
@@ -331,6 +334,8 @@ def run_pipeline(
         )
 
         global_hist = ola_2.merge_histograms(histograms)
+
+        
         final_rf = ola_2.get_final_binwidths(
             global_hist,
             config.k,
@@ -340,6 +345,47 @@ def run_pipeline(
         lowest_dm_star = ola_2.lowest_dm_star
         num_eq_classes = ola_2.best_num_eq_classes
         eq_class_stats = ola_2.get_equivalence_class_stats(global_hist, final_rf, config.k)
+
+
+        # ---------------------------------------------
+        # DEBUG: dump histogram + sensitive sets for Rust parity
+        # ---------------------------------------------
+       
+
+        os.makedirs("debug", exist_ok=True)
+
+        # Histogram
+        with open("debug/global_hist_shape.json", "w") as f:
+            json.dump([int(x) for x in global_hist.shape], f)
+
+        with open("debug/global_hist_flat.json", "w") as f:
+            json.dump([int(x) for x in global_hist.flatten()], f)
+
+        # Sensitive sets
+        sens = ola_2.sensitive_sets
+        with open("debug/sensitive_sets_shape.json", "w") as f:
+            json.dump([int(x) for x in sens.shape], f)
+
+        flat_sets = []
+        for idx in np.ndindex(sens.shape):
+            flat_sets.append([str(x) for x in sens[idx]])
+
+        with open("debug/sensitive_sets_flat.json", "w") as f:
+            json.dump(flat_sets, f)
+        max_level = [compute_max_levels(qi.get_range()) for qi in quasi_identifiers]
+        # Ground truth
+        with open("debug/python_result.json", "w") as f:
+            json.dump({
+                "initial_ri": [int(x) for x in initial_ri],
+                "max_levels": max_level,
+                "final_rf": [int(x) for x in final_rf],
+                "lowest_dm_star": int(ola_2.lowest_dm_star),
+                "num_equivalence_classes": int(ola_2.best_num_eq_classes),
+                "k": 32,
+                "l": int(config.l if config.enable_l_diversity else 1),
+                "suppression_limit": float(config.suppression_limit),
+                "total_records": int(total_records)
+            }, f, indent=2)
 
     except Exception as e:
         raise SKALDError(
@@ -352,19 +398,20 @@ def run_pipeline(
     # 11. Output generalized chunk
     # ------------------------------------------------------------------
     try:
+        chunk_generalizer = ChunkGeneralizer(quasi_identifiers)
         all_files = sorted([f for f in _safe_listdir(chunk_dir) if f.endswith(".csv")])
         for idx, chunk_file in enumerate(all_files, start=1):
             _ensure_dir(config.output_directory)
             base_name = f"{config.output_path.rstrip('.csv')}_chunk{idx}.csv"
             output_file = os.path.join(config.output_directory, base_name)
             generalize_single_chunk(
-                chunk_file,
-                chunk_dir,
-                output_file,
-                numerical_columns_info,
-                encoding_maps,
-                ola_2,
-                final_rf
+            chunk_file,
+            chunk_dir,
+            output_file,
+            numerical_columns_info,
+            encoding_maps,
+            chunk_generalizer,
+            final_rf
             )
 
         combine_generalized_chunks(config.output_directory, config.output_path)
@@ -465,8 +512,8 @@ def _entry_main() -> str:
         "masking": conf.get("masking", []),
         "encrypt": conf.get("encrypt", []),
         "quasi_identifiers": conf.get("quasi_identifiers", {}),
-        "k": conf.get("k", 1),
-        "l": conf.get("l", 1),
+        "k": conf.get("k_anonymize", {}).get("k", 1),
+        "l": conf.get("l_diversity", {}).get("l", 1),
         "sensitive_parameter": conf.get("sensitive_parameter"),
         "size": conf.get("size", {}),
         "suppression_limit": conf.get("suppression_limit", 0),

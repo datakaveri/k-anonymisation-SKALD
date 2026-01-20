@@ -228,6 +228,7 @@ class OLA_2:
                 if passes or self.suppression_count <= (
                     self.suppression_limit * self.total_records / 100
                 ):
+
                     self.node_status[key] = "pass"
                     pass_nodes.append(node)
                 else:
@@ -254,13 +255,11 @@ class OLA_2:
         if self.suppression_count > 0:
             return False
 
-        if not self.enable_l_diversity:
-            return True
-
-        for idx in np.ndindex(histogram.shape):
-            if histogram[idx] > 0 and len(self.sensitive_sets[idx]) < l:
-                self.suppression_count += histogram[idx]
-                return False
+        if self.enable_l_diversity:
+            for idx in np.ndindex(histogram.shape):
+                if histogram[idx] > 0 and len(self.sensitive_sets[idx]) < l:
+                    self.suppression_count += histogram[idx]
+                    return False
 
         return True
 
@@ -347,187 +346,4 @@ class OLA_2:
                 self.best_num_eq_classes = int(np.sum(merged_hist >= k))
 
 
-    def generalize_chunk(self, chunk, bin_widths):
 
-        gen_chunk = chunk.copy(deep=False)
-
-        for qi, bw in zip(self.quasi_identifiers, bin_widths):
-            col = qi.column_name
-
-            # -------------------------
-            # HANDLE CATEGORICAL QIs
-            # -------------------------
-            if qi.is_categorical:
-                level = int(bw)
-                mapping = {
-                    "Blood Group": self.categorical_generalizer.generalize_blood_group,
-                    "Gender": self.categorical_generalizer.generalize_gender
-                }
-                mapper = mapping.get(qi.column_name, self.categorical_generalizer.generalize_profession)
-                gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
-                continue
-
-            # -------------------------
-            # HANDLE NUMERICAL QIs
-            # -------------------------
-            original_col = col.removesuffix("_encoded") if qi.is_encoded else col
-
-            if qi.is_encoded:
-                enc_series = gen_chunk[col].astype(int)
-
-                encoding_file = os.path.join(
-                    get_encoding_dir(),
-                    f"{original_col.replace(' ', '_').lower()}_encoding.json"
-                )
-
-                with open(encoding_file, "r") as f:
-                    raw_map = json.load(f)
-
-                encoding_map = raw_map["encoding_map"]
-                multiplier   = raw_map.get("multiplier", 1)
-
-                # encoded → real value
-                decoding_map = {int(v): int(k) for k, v in encoding_map.items()}
-
-            else:
-                enc_series = gen_chunk[col].astype(float)
-                decoding_map = None
-                multiplier = 1
-
-            # -------------------------------
-            # BUILD BIN EDGES IN ENCODED SPACE
-            # -------------------------------
-            min_val = int(enc_series.min())
-            max_val = int(enc_series.max())
-            step = int(max(1, bw))
-
-            encoded_edges = list(range(min_val, max_val + 1, step))
-            if not qi.is_encoded :
-                encoded_edges.append(encoded_edges[-1] + step)
-            else:
-                encoded_max = decoding_map.get(max_val,max_val)
-                encoded_edges.append(encoded_max)
-            encoded_edges = np.array(encoded_edges)
-
-            # -------------------------------
-            # DECODE BIN EDGES → REAL VALUES
-            # -------------------------------
-            decoded_edges = []
-            for v in encoded_edges:
-                if decoding_map:
-                    real_v = decoding_map.get(v, v)
-                    real_v = real_v / multiplier
-                else:
-                    real_v = v
-                decoded_edges.append(real_v)
-
-            decoded_edges = np.array(decoded_edges, dtype=float)
-
-            # ------------------------------------
-            # BUILD LABELS FOR REAL VALUE RANGES
-            # ------------------------------------
-            labels = []
-            for i in range(len(decoded_edges) - 1):
-                left = decoded_edges[i]
-                right = decoded_edges[i + 1] - 1       # exclusive upper boundary
-                labels.append(f"[{left}-{right}]")
-            #print(f"labels for {original_col}: {labels}")
-            # ------------------------------------
-            # APPLY GENERALIZATION
-            # ------------------------------------
-            # Use actual encoded edges for binning
-            gen_chunk[original_col] = pd.cut(
-                enc_series,
-                bins=encoded_edges,
-                labels=labels,
-                include_lowest=True,
-                right=False    # ensures exclusive bins → 5–10, 11–16
-            )
-
-        return gen_chunk
-
-
-    def get_suppressed_percent(self, node, histogram, k):
-        histogram,_ = self.merge_equivalence_classes(histogram, self.sensitive_sets,list(node))
-        self.suppression_count = np.sum((histogram > 0) & (histogram < k))
-        return (self.suppression_count / self.total_records) * 100
-
-    def _print_failing_equivalence_classes(self, histogram, k, l,node):
-        print("\n========== Failing Equivalence Classes ==========\n")
-
-        # 1. Print histogram bins < k  (k-anonymity failures)
-        failing_k = np.argwhere((histogram > 0) & (histogram < k))
-        new_bin_widths = list(node)
-        if failing_k.size > 0:
-            print(" K-ANONYMITY FAILURES (count < k):")
-            for idx in failing_k:
-                count = histogram[tuple(idx)]
-                desc = self.describe_equivalence_class(tuple(idx), new_bin_widths)
-                print(f" {desc}  → count = {count}")
-        else:
-            print("✔ No k-anonymity failures.")
-
-        # If l-diversity is disabled, stop here
-        if not self.enable_l_diversity:
-            print("\nL-diversity disabled → skipping sensitive-set failures.\n")
-            return
-
-        # 2. L-diversity failures
-        print("\n L-DIVERSITY FAILURES:")
-        for idx in np.ndindex(histogram.shape):
-            count = histogram[idx]
-            if count == 0:
-                continue
-            sens_set = self.sensitive_sets[idx]
-            if len(sens_set) < l:
-                print(f"  Index {idx} -> count={count}, sensitive_values={sens_set}")
-
-    def describe_equivalence_class(self, idx_tuple, bin_widths):
-        """
-        Converts a histogram index into human-readable bin intervals per QI.
-        """
-        desc = []
-
-        for i, (qi, bin_w) in enumerate(zip(self.quasi_identifiers, bin_widths)):
-            dom = self.domains[i]
-            idx = idx_tuple[i]
-
-            # ---------- CATEGORICAL ----------
-            if qi.is_categorical:
-                try:
-                    value = dom[idx]
-                    desc.append(f"{qi.column_name} = {value}")
-                except Exception:
-                    desc.append(f"{qi.column_name} = <invalid_index {idx}>")
-
-            # ---------- NUMERIC ----------
-            else:
-                # numeric QI domain is the sorted list of possible values
-                try:
-                    col_min, col_max = min(dom), max(dom)
-                except Exception:
-                    desc.append(f"{qi.column_name} = <domain_error>")
-                    continue
-
-                bw = int(bin_w)
-                start = col_min + idx * bw
-                end = start + bw - 1
-
-                # clamp numeric range
-                if start < col_min: start = col_min
-                if end > col_max: end = col_max
-
-                desc.append(f"{qi.column_name} ∈ [{start}–{end}]")
-
-        return ", ".join(desc)
-    
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _get_max_categorical_level(qi):
-        if qi.column_name == "Blood Group":
-            return 3
-        if qi.column_name.lower() == "gender":
-            return 2
-        return 4

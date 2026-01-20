@@ -53,11 +53,19 @@ def build_quasi_identifiers(
         column = info["column"]
         if not isinstance(column, str) or not column.strip():
             raise ValueError("Numerical QI 'column' must be a non-empty string")
-
+        scale = bool(info.get("scale", False))
+        s = int(info.get("s", 0))
         encode = bool(info.get("encode", False))
+        if scale and encode:
+            effective_column = f"{column}_scaled_encoded"
+        elif encode:
+            effective_column = f"{column}_encoded"
+        elif scale:
+            effective_column = f"{column}_scaled"
+        else:
+            effective_column = column
 
-        encoded_column = f"{column}_encoded" if encode else column
-        all_quasi_columns.append(encoded_column)
+        all_quasi_columns.append(effective_column)
 
         # --------------------
         # Encoded numerical QI
@@ -114,8 +122,9 @@ def build_quasi_identifiers(
         # --------------------
         try:
             qi = QuasiIdentifier(
-                encoded_column,
+                effective_column,
                 is_categorical=False,
+                is_scaled=scale,
                 is_encoded=encode,
                 min_value=min_val,
                 max_value=max_val,
@@ -142,6 +151,7 @@ def build_quasi_identifiers(
             qi = QuasiIdentifier(
                 column,
                 is_categorical=True,
+                is_scaled=False,
                 is_encoded=False
             )
         except Exception as e:

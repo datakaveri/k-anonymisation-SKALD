@@ -14,7 +14,7 @@ class QuasiIdentifier:
         "Profession": 4     
     }
 
-    def __init__(self, column_name: str, is_categorical: bool = False, is_encoded: bool = False, min_value=None, max_value=None):
+    def __init__(self, column_name: str, is_categorical: bool = False, is_scaled: bool = False, is_encoded: bool = False, min_value=None, max_value=None):
         """
         Initializes a QuasiIdentifier object.
 
@@ -26,6 +26,7 @@ class QuasiIdentifier:
         """
         self.column_name = column_name
         self.is_categorical = is_categorical
+        self.is_scaled = is_scaled
         self.is_encoded = is_encoded
 
         if self.is_categorical and column_name in self.CATEGORICAL_RANGES:

@@ -71,6 +71,15 @@ class OLA_2:
 
         self.categorical_generalizer = CategoricalGeneralizer()
 
+    def get_base_column_name(self, col_name: str) -> str:
+        if col_name.endswith("_scaled_encoded"):
+            return col_name[:-15]
+        elif col_name.endswith("_encoded"):
+            return col_name[:-8]
+        elif col_name.endswith("_scaled"):
+            return col_name[:-7]
+        else:
+            return col_name
     # ------------------------------------------------------------------
     # Tree construction
     # ------------------------------------------------------------------
@@ -92,7 +101,7 @@ class OLA_2:
                         if new_node[i] < max_level:
                             new_node[i] += 1
                     else:
-                        base_col = qi.column_name[:-8] if qi.is_encoded else qi.column_name
+                        base_col = self.get_base_column_name(qi.column_name)
                         if base_col not in self.multiplication_factors:
                             raise KeyError(
                                 f"Missing multiplication factor for '{base_col}'"
@@ -118,18 +127,18 @@ class OLA_2:
         self.domains = []
 
         for qi in self.quasi_identifiers:
-            col = qi.column_name
-            if qi.is_encoded and not col.endswith("_encoded"):
-                col += "_encoded"
+            col = qi.column_name  # already effective column
 
             if col not in dataset.columns:
                 raise KeyError(f"Column '{col}' missing while building domains")
 
             values = dataset[col].dropna().unique().tolist()
+
             if not values:
                 raise ValueError(f"No valid values for column '{col}'")
 
             self.domains.append(sorted(values))
+
 
     def process_chunk(self, chunk: pd.DataFrame, bin_widths: List[int]) -> np.ndarray:
         if not isinstance(chunk, pd.DataFrame) or chunk.empty:
@@ -172,13 +181,12 @@ class OLA_2:
 
         return histogram
 
+
     def _get_bin_index(self, row, bin_widths, num_bin_info):
         indices = []
 
         for i, (qi, bw) in enumerate(zip(self.quasi_identifiers, bin_widths)):
-            col = qi.column_name
-            if qi.is_encoded and not col.endswith("_encoded"):
-                col += "_encoded"
+            col = qi.column_name  # already effective column
 
             val = row[col]
 
@@ -191,6 +199,7 @@ class OLA_2:
 
         return tuple(indices)
 
+
     # ------------------------------------------------------------------
     # Histogram merging
     # ------------------------------------------------------------------
@@ -202,6 +211,7 @@ class OLA_2:
     # ------------------------------------------------------------------
     # RF evaluation
     # ------------------------------------------------------------------
+
     def get_final_binwidths(self, histogram, k: int, l: int):
         if histogram is None:
             raise ValueError("histogram cannot be None")
@@ -213,10 +223,22 @@ class OLA_2:
         total_nodes = sum(len(level) for level in self.tree)
         pbar = tqdm(total=total_nodes, desc="Evaluating nodes", unit="node")
 
-        for level in self.tree:
-            for node in level:
+        while any(v is None for v in self.node_status.values()):
+            histogram = base_hist.copy()
+            unmarked_levels = [i for i in range(len(self.tree)) if any(self.node_status.get(tuple(node)) is None for node in self.tree[i])]
+            if not unmarked_levels:
+                break
+            
+            mid_level = unmarked_levels[len(unmarked_levels) // 2]
+            sorted_nodes = sorted(
+                [node for node in self.tree[mid_level] if self.node_status[tuple(node)] is None], reverse=True
+            )
+
+            if sorted_nodes:
+                node = sorted_nodes[len(sorted_nodes) // 2]
                 key = tuple(node)
                 if self.node_status[key] is not None:
+                    print("Node %s already marked, skipping.", node)
                     pbar.update(1)
                     continue
 
@@ -228,10 +250,14 @@ class OLA_2:
                 if passes or self.suppression_count <= (
                     self.suppression_limit * self.total_records / 100
                 ):
+                    logger.info("suppression_count for %s: %d", node, self.suppression_count)
                     self.node_status[key] = "pass"
                     pass_nodes.append(node)
+                    self._mark_subtree_pass(node, pbar)
+
                 else:
                     self.node_status[key] = "fail"
+                    self._mark_parents_fail(node, pbar)
 
                 pbar.update(1)
 
@@ -243,17 +269,51 @@ class OLA_2:
         self.find_best_rf(base_hist, pass_nodes, k, l, base_sets)
         return self.smallest_passing_rf
 
+    def _mark_subtree_pass(self, node, pbar=None):
+        q = [node]
+        while q:
+            current = q.pop(0)
+            key = tuple(current)
+            if self.node_status.get(key) is None:
+                self.node_status[key] = 'pass'
+                if pbar: pbar.update(1)
+
+            for level in self.tree:
+                for child in level:
+                    t_child = tuple(child)
+                    if all(child[i] >= current[i] for i in range(len(child))) and self.node_status.get(t_child) is None:
+                        self.node_status[t_child] = 'pass'
+                        q.append(child)
+                        if pbar: pbar.update(1)
+
+    def _mark_parents_fail(self, node, pbar=None):
+        q = [node]
+        while q:
+            current = q.pop(0)
+            key = tuple(current)
+            if self.node_status.get(key) is None:
+                self.node_status[key] = 'fail'
+                if pbar: pbar.update(1)
+
+            for level in reversed(self.tree):
+                for parent in level:
+                    parent_key = tuple(parent)
+                    if all(parent[i] <= current[i] for i in range(len(current))) and self.node_status.get(parent_key) is None:
+                        self.node_status[parent_key] = 'fail'
+                        q.append(parent)
+                        if pbar: pbar.update(1)
     # ------------------------------------------------------------------
     # k / l checks
     # ------------------------------------------------------------------
-    def check_k_anonymity(self, histogram, k: int, l: int):
+    def check_k_anonymity(self, merged_histogram, k: int, l: int):
+
         self.suppression_count = int(
-            np.sum(histogram[(histogram > 0) & (histogram < k)])
+            np.sum(merged_histogram[(merged_histogram > 0) & (merged_histogram < k)])
         )
 
         if self.suppression_count > 0:
             return False
-
+        '''
         if not self.enable_l_diversity:
             return True
 
@@ -261,7 +321,7 @@ class OLA_2:
             if histogram[idx] > 0 and len(self.sensitive_sets[idx]) < l:
                 self.suppression_count += histogram[idx]
                 return False
-
+        '''
         return True
 
     # ------------------------------------------------------------------
@@ -347,11 +407,11 @@ class OLA_2:
                 self.best_num_eq_classes = int(np.sum(merged_hist >= k))
 
 
-    def generalize_chunk(self, chunk, bin_widths):
+    def generalize_chunk(self, chunk, bin_widths, s_list):
 
         gen_chunk = chunk.copy(deep=False)
 
-        for qi, bw in zip(self.quasi_identifiers, bin_widths):
+        for qi, bw, s in zip(self.quasi_identifiers, bin_widths, s_list):
             col = qi.column_name
 
             # -------------------------
@@ -363,17 +423,25 @@ class OLA_2:
                     "Blood Group": self.categorical_generalizer.generalize_blood_group,
                     "Gender": self.categorical_generalizer.generalize_gender
                 }
-                mapper = mapping.get(qi.column_name, self.categorical_generalizer.generalize_profession)
+                mapper = mapping.get(
+                    qi.column_name,
+                    self.categorical_generalizer.generalize_profession
+                )
                 gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
                 continue
 
             # -------------------------
             # HANDLE NUMERICAL QIs
             # -------------------------
-            original_col = col.removesuffix("_encoded") if qi.is_encoded else col
+            original_col = col.removesuffix("_scaled_encoded") \
+                if col.endswith("_scaled_encoded") else \
+                col.removesuffix("_encoded")
 
+            # ------------------------------------
+            # DETERMINE ENCODED SERIES
+            # ------------------------------------
             if qi.is_encoded:
-                enc_series = gen_chunk[col].astype(int)
+                enc_series = gen_chunk[col].astype("int64")
 
                 encoding_file = os.path.join(
                     get_encoding_dir(),
@@ -384,67 +452,65 @@ class OLA_2:
                     raw_map = json.load(f)
 
                 encoding_map = raw_map["encoding_map"]
-                multiplier   = raw_map.get("multiplier", 1)
-
-                # encoded → real value
                 decoding_map = {int(v): int(k) for k, v in encoding_map.items()}
 
             else:
-                enc_series = gen_chunk[col].astype(float)
+                enc_series = gen_chunk[col].astype("int64")
                 decoding_map = None
-                multiplier = 1
-
-            # -------------------------------
-            # BUILD BIN EDGES IN ENCODED SPACE
-            # -------------------------------
-            min_val = int(enc_series.min())
-            max_val = int(enc_series.max())
-            step = int(max(1, bw))
-
-            encoded_edges = list(range(min_val, max_val + 1, step))
-            if not qi.is_encoded :
-                encoded_edges.append(encoded_edges[-1] + step)
-            else:
-                encoded_max = decoding_map.get(max_val,max_val)
-                encoded_edges.append(encoded_max)
-            encoded_edges = np.array(encoded_edges)
-
-            # -------------------------------
-            # DECODE BIN EDGES → REAL VALUES
-            # -------------------------------
-            decoded_edges = []
-            for v in encoded_edges:
-                if decoding_map:
-                    real_v = decoding_map.get(v, v)
-                    real_v = real_v / multiplier
-                else:
-                    real_v = v
-                decoded_edges.append(real_v)
-
-            decoded_edges = np.array(decoded_edges, dtype=float)
 
             # ------------------------------------
-            # BUILD LABELS FOR REAL VALUE RANGES
+            # BUILD BIN EDGES IN ENCODED SPACE
+            # ------------------------------------
+            min_val = int(enc_series.min())
+            max_val = int(enc_series.max())
+            step = max(1, int(bw))
+
+            encoded_edges = list(range(min_val, max_val + 1, step))
+            encoded_edges.append(encoded_edges[-1] + step)
+            encoded_edges = np.array(encoded_edges, dtype=int)
+
+            # ------------------------------------
+            # DECODE BIN EDGES (STILL SCALED DOMAIN)
+            # ------------------------------------
+            if decoding_map:
+                decoded_edges = np.array(
+                    [decoding_map.get(v, v) for v in encoded_edges],
+                    dtype=float
+                )
+            else:
+                decoded_edges = encoded_edges.astype(float)
+
+            # ------------------------------------
+            # INVERSE SCALING TO ORIGINAL DOMAIN
+            # ------------------------------------
+            if s > 0:
+                decoded_edges = decoded_edges * (10 ** s)
+            elif s < 0:
+                decoded_edges = np.round(decoded_edges * (10 ** s), abs(s))
+            # s == 0 → identity
+
+            # ------------------------------------
+            # BUILD LABELS
             # ------------------------------------
             labels = []
             for i in range(len(decoded_edges) - 1):
                 left = decoded_edges[i]
-                right = decoded_edges[i + 1] - 1       # exclusive upper boundary
-                labels.append(f"[{left}-{right}]")
-            #print(f"labels for {original_col}: {labels}")
+                right = decoded_edges[i + 1]
+                labels.append(f"[{left}-{right})")
+
             # ------------------------------------
-            # APPLY GENERALIZATION
+            # APPLY GENERALISATION
             # ------------------------------------
-            # Use actual encoded edges for binning
             gen_chunk[original_col] = pd.cut(
                 enc_series,
                 bins=encoded_edges,
                 labels=labels,
                 include_lowest=True,
-                right=False    # ensures exclusive bins → 5–10, 11–16
+                right=False
             )
 
         return gen_chunk
+
 
 
     def get_suppressed_percent(self, node, histogram, k):

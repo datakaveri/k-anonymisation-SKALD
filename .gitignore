@@ -73,11 +73,9 @@ encoded_pins.txt
 coverage.txt
 merging.py
 datas/
-bin/
 lib64
 *.cfg
 SKALD/temp/
-*.bin
 *.o
 *.d
 *.exe

@@ -248,7 +248,7 @@ class OLA_2:
 
                 passes = self.check_k_anonymity(merged_hist, k, l)
                 if passes or self.suppression_count <= (
-                    self.suppression_limit * self.total_records / 100
+                    self.suppression_limit * self.total_records
                 ):
                     logger.info("suppression_count for %s: %d", node, self.suppression_count)
                     self.node_status[key] = "pass"

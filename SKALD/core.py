@@ -450,12 +450,17 @@ def _entry_main() -> str:
 
     if "operations" not in config or "data_type" not in config:
         raise KeyError("Invalid config JSON")
-
+    operations = config["operations"]
+    enable_k_anonymity = False
+    if "k-anonymity" in operations:
+        enable_k_anonymity = True
+    else:
+        enable_k_anonymity = False
     dataset = config["data_type"]
     conf = config.get(dataset, {})
 
     yaml_config = {
-        "enable_k_anonymity": conf.get("enable_k_anonymity", True),
+        "enable_k_anonymity": enable_k_anonymity,
         "enable_l_diversity": conf.get("enable_l_diversity", False),
         "output_path": conf.get("output_path", "generalized.csv"),
         "output_directory": conf.get("output_directory", "output"),

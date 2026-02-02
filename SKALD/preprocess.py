@@ -52,17 +52,17 @@ def hash_columns(
                      type(columns_without_salt).__name__)
         raise TypeError("Hashing column lists must be lists")
 
-    salt = generate_global_salt() if columns_with_salt else None
     logger.debug("Generated global salt for hashing")
     for col in columns_with_salt:
+        salt = generate_global_salt() if columns_with_salt else None
         if col not in dataframe.columns:
             raise KeyError(f"Column '{col}' not found for salted hashing")
-
         dataframe[col] = dataframe[col].astype(str).apply(
             lambda x: hashlib.sha256((salt + x).encode()).hexdigest()
             if x.lower() != "nan" else x
         )
         logger.info("Applied salted hashing to column: %s", col)
+
     for col in columns_without_salt:
         if col not in dataframe.columns:
             raise KeyError(f"Column '{col}' not found for hashing")

@@ -15,7 +15,7 @@ logger = logging.getLogger("SKALD")
 # -------------------------------
 class NumericalQuasiIdentifier(BaseModel):
     column: str
-    scale: bool
+    scale: Optional[bool] = None
     s: Optional[int] = 0
     encode: bool
     type: str

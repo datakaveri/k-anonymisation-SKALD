@@ -152,29 +152,29 @@ def mask_columns(dataframe: pd.DataFrame, masking_info: List[Dict]) -> pd.DataFr
 
         if column not in dataframe.columns:
             raise KeyError(f"Column '{column}' not found for masking")
-
-        start_digits = int(mask.get("start_digits", 0))
-        end_digits = int(mask.get("end_digits", 0))
+        
+        
         masking_character = mask.get("masking_character", "*")
+        characters_to_mask = mask.get("characters_to_mask", [])
+        if (not isinstance(characters_to_mask, list) or
+            not all(isinstance(i, int) and i > 0 for i in characters_to_mask)):
+            raise ValueError("'characters_to_mask' must be a list of positive integers")
+        if not characters_to_mask:
+            raise ValueError("'characters_to_mask' cannot be empty")
+        
 
-        if start_digits < 0 or end_digits < 0:
-            raise ValueError("start_digits and end_digits must be non-negative")
-
-        if end_digits < start_digits:
-            raise ValueError("end_digits cannot be less than start_digits")
 
         def mask_value(value):
-            s = str(value)
-            end_digits_final = min(end_digits, len(s))
-            if len(s) <= start_digits:
-                logger.log("Value too short to mask: %s returning the actual value", s)
-                return s
-            
-            return (
-                s[:start_digits-1] +
-                masking_character * (end_digits_final - start_digits + 1) +
-                s[end_digits_final:]
-            )
+            s = list(str(value))
+            n = len(s)
+
+            for pos in characters_to_mask:
+                idx = pos - 1
+                if 0 <= idx < n:
+                    s[idx] = masking_character
+
+            return ''.join(s)
+
 
         dataframe[column] = dataframe[column].apply(mask_value)
         logger.info("Masked column: %s", column)

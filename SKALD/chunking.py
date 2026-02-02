@@ -80,7 +80,7 @@ def split_csv_by_ram(data_dir="data"):
     # --- Estimate rows per chunk ---
     try:
         sample = pd.read_csv(input_csv, nrows=10000)
-
+        #if number of rows less than 10k, then it will read all rows available in the csv
     except Exception as e:
         raise RuntimeError(f"Failed reading sample of CSV '{input_csv}': {e}")
 

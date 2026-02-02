@@ -1,59 +1,73 @@
-# SKALD/encoder.py
 import os
+import numpy as np
 import pandas as pd
 import json
+from typing import List, Dict, Tuple
 from SKALD.utils import find_max_decimal_places
+import logging
+logger = logging.getLogger("SKALD")
 
 
-def get_encoding_dir():
-    """Return the encoding directory, creating it if needed."""
+# --------------------------------------------------
+# Encoding directory
+# --------------------------------------------------
+def get_encoding_dir() -> str:
     try:
         d = os.getenv("SKALD_ENCODING_DIR", "encodings")
         os.makedirs(d, exist_ok=True)
         return d
     except Exception as e:
-        raise OSError(f"Failed to create or access encoding directory '{d}': {e}") from e
+        raise OSError(f"Failed to create or access encoding directory: {e}")
 
 
-def to_py_int(x):
-    """Convert numpy.int64 or pandas Int64 to plain Python int."""
-    try:
-        return int(x)
-    except Exception as e:
-        raise ValueError(f"Failed to convert value '{x}' to int: {e}") from e
-
-
-def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
+# --------------------------------------------------
+# Numerical encoding
+# --------------------------------------------------
+def encode_numerical_columns(
+    chunk_files: List[str],
+    chunk_dir: str,
+    numerical_columns_info: List[Dict]
+) -> Tuple[Dict, Dict]:
     """
-    Encode numerical columns across all chunks (only when encode=True).
-    Always computes min/max for ALL numerical QIs.
+    Encodes numerical columns across all chunks.
+
     Returns:
-        encoding_maps: dict for encoded columns
-        dynamic_min_max: dict[min,max] for all numerical QIs
+        encoding_maps: per-column encoding metadata
+        dynamic_min_max: {column: [min, max]}
     """
+
+    if not isinstance(chunk_files, list) or not chunk_files:
+        raise ValueError("chunk_files must be a non-empty list")
+
+    if not isinstance(numerical_columns_info, list):
+        raise TypeError("numerical_columns_info must be a list")
+
+    if not os.path.isdir(chunk_dir):
+        raise FileNotFoundError(f"Chunk directory not found: {chunk_dir}")
 
     encoding_dir = get_encoding_dir()
     encoding_maps = {}
     dynamic_min_max = {}
 
-    if not isinstance(chunk_files, list) or not chunk_files:
-        raise ValueError("chunk_files must be a non-empty list of filenames.")
-
-    if not os.path.isdir(chunk_dir):
-        raise FileNotFoundError(f"Chunk directory does not exist: {chunk_dir}")
-
     for info in numerical_columns_info:
+        if not isinstance(info, dict):
+            raise ValueError(f"Invalid numerical QI info: {info}")
+
         col = info.get("column")
-        encode = info.get("encode", False)
+        encode = bool(info.get("encode", False))
         dtype = info.get("type", "float")
 
         if not col:
-            raise ValueError(f"Invalid numerical QI info (missing 'column'): {info}")
+            raise ValueError("Numerical QI missing 'column'")
 
-        all_vals = []               # used only if encoding
+        all_vals = []
         col_min, col_max = None, None
+        multiplier = 1
+        logger.info("Encoding column '%s' (type=%s)", col, dtype)
 
-        # -------- scan all chunks for min/max (ALWAYS DONE) --------
+        # --------------------------------------------------
+        # Scan all chunks
+        # --------------------------------------------------
         for filename in chunk_files:
             file_path = os.path.join(chunk_dir, filename)
 
@@ -66,43 +80,51 @@ def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
                 raise RuntimeError(f"Failed to read chunk '{filename}': {e}")
 
             if col not in df.columns:
-                raise KeyError(f"Column '{col}' not found in chunk '{filename}'.")
+                raise KeyError(f"Column '{col}' not found in chunk '{filename}'")
 
             vals = df[col].dropna()
+            if info.get("scale", False):
+                s = int(info.get("s", 0))
+                vals = np.floor(vals / (10 ** s))
 
-            # update global min/max
-            if col_min is None:
-                col_min, col_max = vals.min(), vals.max()
-            else:
-                col_min = min(col_min, vals.min())
-                col_max = max(col_max, vals.max())
+            if vals.empty:
+                continue
 
-            # -------- collect values ONLY for encoded columns --------
-            if encode:
-                if dtype == "float":
-                    decimals = find_max_decimal_places(vals)
-                    multiplier = 10 ** decimals
-                    vals = (vals * multiplier).round().astype("int64")
-                else:
-                    multiplier = 1
-                    vals = vals.astype("int64")
+            # Update min/max
+            col_min = vals.min() if col_min is None else min(col_min, vals.min())
+            col_max = vals.max() if col_max is None else max(col_max, vals.max())
 
-                all_vals.extend(int(v) for v in vals.tolist())
+            # Collect values for encoding
+            vals = vals.astype("int64")
 
-        # store min/max for THIS column
-        dynamic_min_max[col] = [float(col_min), float(col_max)]
+            all_vals.extend(vals.tolist())
 
-        # -------- skip encoding if encode=False --------
+        # --------------------------------------------------
+        # Validate min/max
+        # --------------------------------------------------
+        if col_min is None or col_max is None:
+            raise ValueError(f"Column '{col}' has no valid numeric values")
+
+        
+
+
+        # --------------------------------------------------
+        # Skip encoding if not required
+        # --------------------------------------------------
         if not encode:
+            dynamic_min_max[col] = [col_min, col_max]
             continue
 
-        # ===== encoding happens only below =====
-        unique_sorted = sorted(set(all_vals))
-        if not unique_sorted:
-            raise ValueError(f"Column '{col}' has no valid values to encode.")
+        if not all_vals:
+            raise ValueError(f"Column '{col}' has no values to encode")
 
-        encoding_map = {int(v): i + 1 for i, v in enumerate(unique_sorted)}
-        decoding_map = {i + 1: int(v) for i, v in enumerate(unique_sorted)}
+        # --------------------------------------------------
+        # Build encoding maps
+        # --------------------------------------------------
+        unique_sorted = sorted(set(int(v) for v in all_vals))
+
+        encoding_map = {v: i + 1 for i, v in enumerate(unique_sorted)}
+        decoding_map = {i + 1: v for i, v in enumerate(unique_sorted)}
 
         encoding_maps[col] = {
             "encoding_map": encoding_map,
@@ -111,9 +133,21 @@ def encode_numerical_columns(chunk_files, chunk_dir, numerical_columns_info):
             "type": dtype,
         }
 
-        # write encoding json
-        fname = f"{col.lower()}_encoding.json"
-        with open(os.path.join(encoding_dir, fname), "w") as f:
-            json.dump(encoding_maps[col], f, indent=4)
+        # --------------------------------------------------
+        # Persist encoding atomically
+        # --------------------------------------------------
+        encoding_file = os.path.join(encoding_dir, f"{col.lower()}_encoding.json")
+        tmp_file = encoding_file + ".tmp"
 
+        try:
+            with open(tmp_file, "w") as f:
+                json.dump(encoding_maps[col], f, indent=4)
+            os.replace(tmp_file, encoding_file)
+        except Exception as e:
+            raise OSError(f"Failed to write encoding file for '{col}': {e}")
+        encoded_min = min(encoding_map.values())
+        encoded_max = max(encoding_map.values())
+        dynamic_min_max[col] = [encoded_min, encoded_max]
+
+        
     return encoding_maps, dynamic_min_max

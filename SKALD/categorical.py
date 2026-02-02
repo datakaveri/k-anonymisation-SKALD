@@ -1,10 +1,15 @@
+import logging
+logger = logging.getLogger("SKALD")
+
+
 class CategoricalGeneralizer:
+    """
+    Safe categorical generalization with deterministic fallbacks.
+    """
+
     def __init__(self):
-        """
-        Initializes hierarchies for generalizing categorical attributes.
-        """
         self.hierarchies = {
-            "Blood Group": {
+            "blood group": {
                 1: {
                     "A+": "A+", "A-": "A-", "B+": "B+", "B-": "B-",
                     "AB+": "AB+", "AB-": "AB-", "O+": "O+", "O-": "O-"
@@ -18,11 +23,11 @@ class CategoricalGeneralizer:
                     "AB+": "*", "AB-": "*", "O+": "*", "O-": "*"
                 }
             },
-            "GENDER": {
+            "gender": {
                 1: {"Male": "Male", "Female": "Female"},
                 2: {"Male": "*", "Female": "*"}
             },
-            "Profession": {
+            "profession": {
                 1: lambda x: x,
                 2: {
                     "Medical Specialists": "Healthcare",
@@ -60,75 +65,60 @@ class CategoricalGeneralizer:
                     "Data & Analytics": "Non-Service",
                     "AI & Machine Learning": "Non-Service"
                 },
-                4: lambda x: "*"
+                4: lambda _: "*"
             }
         }
 
     # ----------------------------------------------------
-    # Core generalization logic with robust error handling
+    # Core generalization
     # ----------------------------------------------------
-    def generalize(self, column_name, value, level):
-        """
-        Generalizes a categorical value with full safety checks.
-
-        Args:
-            column_name (str)
-            value (str or None)
-            level (int)
-
-        Returns:
-            str: generalized value or safe fallback.
-        """
-
-        # Protect against None values
+    def generalize(self, column_name: str, value, level: int) -> str:
         if value is None:
             return "Unknown"
 
-        # Ensure string
         try:
             value = str(value)
         except Exception:
             return "Invalid"
 
-        # Missing column hierarchy → return original value
-        if column_name not in self.hierarchies:
-            return value  
+        col_key = column_name.strip().lower()
+        hierarchy = self.hierarchies.get(col_key)
 
-        hierarchy = self.hierarchies[column_name]
+        if hierarchy is None:
+            return value
 
-        # Invalid level
-        if level not in hierarchy:
-            # fallback to closest available level OR return original
-            safe_level = max([lvl for lvl in hierarchy.keys() if isinstance(lvl, int)], default=None)
-            if safe_level:
-                level = safe_level
-            else:
-                return value
+        if not isinstance(level, int):
+            return value
 
-        mapping_or_func = hierarchy.get(level)
+        valid_levels = sorted(hierarchy.keys())
 
-        # Dictionary mapping
-        if isinstance(mapping_or_func, dict):
-            return mapping_or_func.get(value, "Other")
+        # Clamp level safely
+        if level < valid_levels[0]:
+            level = valid_levels[0]
+        elif level > valid_levels[-1]:
+            level = valid_levels[-1]
 
-        # Functional mapping
-        if callable(mapping_or_func):
+        rule = hierarchy[level]
+
+        if isinstance(rule, dict):
+            return rule.get(value, "Other")
+
+        if callable(rule):
             try:
-                return mapping_or_func(value)
+                return rule(value)
             except Exception:
                 return "Other"
 
-        # Unexpected structure
         return value
 
     # ----------------------------------------------------
     # Convenience wrappers
     # ----------------------------------------------------
     def generalize_blood_group(self, value, level):
-        return self.generalize("Blood Group", value, level)
-
-    def generalize_profession(self, value, level):
-        return self.generalize("Profession", value, level)
+        return self.generalize("blood group", value, level)
 
     def generalize_gender(self, value, level):
-        return self.generalize("GENDER", value, level)
+        return self.generalize("gender", value, level)
+
+    def generalize_profession(self, value, level):
+        return self.generalize("profession", value, level)

@@ -2,6 +2,8 @@ import pandas as pd
 import psutil
 import os
 import shutil
+import logging
+logger = logging.getLogger("SKALD")
 
 def split_csv_by_ram(data_dir="data"):
     """
@@ -20,8 +22,10 @@ def split_csv_by_ram(data_dir="data"):
 
     # --- Validate data directory ---
     if not isinstance(data_dir, str):
+        logger.error("data_dir must be a string path.")
         raise TypeError("data_dir must be a string path.")
     if not os.path.isdir(data_dir):
+        logger.error("Data directory does not exist: '%s'", data_dir)
         raise FileNotFoundError(f"Data directory does not exist: '{data_dir}'")
 
     os.makedirs("chunks", exist_ok=True)
@@ -33,10 +37,11 @@ def split_csv_by_ram(data_dir="data"):
                 os.unlink(path)
             elif os.path.isdir(path):
                 shutil.rmtree(path)
+        logger.debug("Cleared any existing contents of '%s'", chunks_dir)
     except Exception as e:
+        logger.error("Failed clearing '%s': %s", chunks_dir, e)
         raise OSError(f"Failed clearing '{chunks_dir}': {e}")
-    else:
-        print(f"Cleared any existing contents of '{chunks_dir}'")
+
     # --- Find CSV file safely ---
     try:
         csv_files = [f for f in os.listdir(data_dir) if f.lower().endswith(".csv")]
@@ -51,23 +56,26 @@ def split_csv_by_ram(data_dir="data"):
         )
 
     input_csv = os.path.join(data_dir, csv_files[0])
-    print(f"Detected CSV: {input_csv}")
+    #print(f"Detected CSV: {input_csv}")
 
     # --- Detect RAM safely ---
     try:
         total_ram_bytes = psutil.virtual_memory().total
+        logger.info("Detected total RAM: %s bytes", total_ram_bytes)
     except Exception as e:
+        logger.error("Failed to detect system RAM: %s", e)
         raise RuntimeError(f"Unable to detect system RAM: {e}")
 
     if total_ram_bytes <= 0:
-        raise RuntimeError("System RAM reported as zero or negative. Cannot compute chunk size.")
 
+        raise RuntimeError("System RAM reported as zero or negative. Cannot compute chunk size.")
+    
     chunk_ram_bytes = max(total_ram_bytes // 4, 50 * 1024 * 1024)  
     # ensure at least 50MB chunks
 
     chunk_ram_gb = chunk_ram_bytes / (1024 ** 3)
-    print(f"Total RAM: {total_ram_bytes / (1024 ** 3):.2f} GB")
-    print(f"Using approx {chunk_ram_gb:.2f} GB per chunk")
+
+    logger.info("Splitting CSV '%s' into chunks of approx %.2f GB each", input_csv, chunk_ram_gb)
 
     # --- Estimate rows per chunk ---
     try:
@@ -91,7 +99,12 @@ def split_csv_by_ram(data_dir="data"):
     rows_per_chunk = max(rows_per_chunk, 1000)  
     # minimum 1000 rows per chunk
 
-    print(f"≈ {rows_per_chunk:,} rows per chunk (~{chunk_ram_gb:.2f} GB)")
+
+    logger.info(
+    "≈ %d rows per chunk (%.2f GB)",
+    rows_per_chunk,
+    chunk_ram_gb
+)
 
     # --- Stream the CSV with chunking ---
     try:
@@ -110,7 +123,6 @@ def split_csv_by_ram(data_dir="data"):
         try:
             chunk.to_csv(out_path, index=False)
             chunk_count += 1
-            print(f"Wrote {out_path} ({len(chunk):,} rows)")
         except Exception as e:
             print(f"[ERROR] Failed writing chunk {i} to '{out_path}': {e}")
             continue
@@ -118,4 +130,4 @@ def split_csv_by_ram(data_dir="data"):
     if chunk_count == 0:
         raise RuntimeError("No chunks were generated. CSV may be too small or unreadable.")
 
-    print("Done splitting CSV into chunks.")
+    logger.info("Successfully created %d chunks in '%s'", chunk_count, chunks_dir)

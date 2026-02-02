@@ -1,35 +1,131 @@
-import pandas as pd
+# SKALD/generalize_chunk.py
+
 import os
-from SKALD.preprocess import suppress, pseudonymize
+import pandas as pd
+import numpy as np
+from SKALD.SKALDError import SKALDError
+import logging
 
-def generalize_first_chunk(chunk_file, output_path, numerical_columns_info, encoding_maps, ola_2,final_rf):
+logger = logging.getLogger("SKALD")
+
+
+def generalize_single_chunk(
+    chunk_file: str,
+    chunk_dir: str,
+    output_path: str,
+    numerical_columns_info,
+    encoding_maps,
+    ola_2,
+    final_rf
+):
     """
-    Generalize the first chunk using final RF bin widths and save to CSV.
+    Generalize a single chunk using final RF bin widths and save to CSV.
     """
-    print("\nGeneralizing first chunk based on RF...")
-    chunk = os.path.join("chunks",chunk_file)
-    chunk = pd.read_csv(chunk)
+
+    # -------------------------
+    # Validate inputs
+    # -------------------------
+    if not os.path.isdir(chunk_dir):
+        raise SKALDError(
+            code="DATA_MISSING",
+            message="Chunk directory not found",
+            details=chunk_dir,
+            suggested_fix="Ensure chunking completed successfully"
+        )
+
+    chunk_path = os.path.join(chunk_dir, chunk_file)
+
+    if not os.path.isfile(chunk_path):
+        raise SKALDError(
+            code="DATA_MISSING",
+            message="Chunk file not found",
+            details=chunk_path
+        )
+
+    # -------------------------
+    # Read chunk
+    # -------------------------
+    try:
+        chunk = pd.read_csv(chunk_path)
+    except Exception as e:
+        raise SKALDError(
+            code="DATA_MISSING",
+            message="Failed to read chunk CSV",
+            details=str(e)
+        )
+
+    if chunk.empty:
+        raise SKALDError(
+            code="DATA_MISSING",
+            message="Chunk is empty",
+            details=chunk_file
+        )
+
     working_chunk = chunk.copy()
+    s_list = []
 
+    # -------------------------
+    # Apply numerical scaling and encoding
+    # -------------------------
     for info in numerical_columns_info:
         column = info["column"]
+        scale  = info.get("scale", False)
         encode = info.get("encode", False)
+        s = int(info.get("s", 0)) if scale else 0
+
+
         if encode:
-            enc_map = encoding_maps[column]["encoding_map"]
-            multiplier = encoding_maps[column]["multiplier"]
-            if info.get("type") == "float":
-                working_chunk[f"{column}_encoded"] = (working_chunk[column] * multiplier).round().astype(int).map(enc_map)
-            else:
-                working_chunk[f"{column}_encoded"] = working_chunk[column].map(enc_map)
+            encoded_col = (
+                f"{column}_scaled_encoded" if scale else f"{column}_encoded"
+            )
 
-    generalized_chunk = ola_2.generalize_chunk(working_chunk,final_rf)
+            if encoded_col not in working_chunk.columns:
+                raise SKALDError(
+                    code="ENCODING_FAILED",
+                    message=f"Missing encoded column '{encoded_col}' during generalization",
+                    suggested_fix="Ensure encoding is applied before generalization"
+                )
 
-    # Remove encoded columns
+    s_list.append(s)
+
+
+    # -------------------------
+    # Generalize using OLA_2
+    # -------------------------
+    try:
+        generalized_chunk = ola_2.generalize_chunk(
+            working_chunk, final_rf, s_list
+        )
+    except Exception as e:
+        raise SKALDError(
+            code="GENERALIZATION_FAILED",
+            message="Failed during generalization step",
+            details=str(e)
+        )
+
+    # -------------------------
+    # Drop intermediate columns
+    # -------------------------
     for info in numerical_columns_info:
-        if info.get("encode", False):
-            col_encoded = f"{info['column']}_encoded"
-            if col_encoded in generalized_chunk.columns:
-                generalized_chunk.drop(columns=[col_encoded], inplace=True)
+        base = info["column"]
+        for suffix in ["_scaled_encoded", "_scaled", "_encoded"]:
+            col = f"{base}{suffix}"
+            if col in generalized_chunk.columns:
+                generalized_chunk.drop(columns=[col], inplace=True)
 
-    generalized_chunk.to_csv(output_path, index=False)
-    print(f"Generalized first chunk saved to: {output_path}")
+    # -------------------------
+    # Write output
+    # -------------------------
+    try:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        generalized_chunk.to_csv(output_path, index=False)
+    except Exception as e:
+        raise SKALDError(
+            code="INTERNAL_ERROR",
+            message="Failed to write generalized output",
+            details=str(e)
+        )
+
+    return output_path
+
+

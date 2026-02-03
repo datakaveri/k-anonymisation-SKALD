@@ -1,7 +1,10 @@
+use std::collections::HashSet;
 use std::fs;
 
-use ndarray::{ArrayD, Axis, IxDyn};
+use ndarray::{ArrayD, IxDyn};
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
+
 
 /// ===============================
 /// Python input (from debug file)
@@ -23,88 +26,74 @@ struct RustResult {
     best_rf: Option<Vec<usize>>,
     lowest_dm_star: Option<i64>,
     num_equivalence_classes: Option<usize>,
+    elapsed_time: f64, 
 }
 
 /// ===============================
 /// Build lattice LEVEL-BY-LEVEL
-/// (matches Python build_tree)
 /// ===============================
 fn build_lattice_levels(
     initial: &[usize],
     max_levels_pow: &[usize],
 ) -> Vec<Vec<Vec<usize>>> {
-    let mut tree: Vec<Vec<Vec<usize>>> = vec![vec![initial.to_vec()]];
-    let mut seen = std::collections::HashSet::new();
+    let mut tree = vec![vec![initial.to_vec()]];
+    let mut seen = HashSet::new();
     seen.insert(initial.to_vec());
-    let max_levels: Vec<usize> = max_levels_pow
-    .iter()
-    .map(|&lvl| 1usize << lvl)
-    .collect();
 
-
+    // max bin width = 2^level
+    let max_levels: Vec<usize> =
+        max_levels_pow.iter().map(|&l| 1usize << l).collect();
 
     loop {
-        let mut next_level = Vec::new();
+        let mut next = Vec::new();
 
         for node in tree.last().unwrap() {
             for i in 0..node.len() {
-                let mut new_node = node.clone();
-                new_node[i] = (new_node[i] * 2).min(max_levels[i]);
+                let mut child = node.clone();
+                child[i] = (child[i] * 2).min(max_levels[i]);
 
-                if new_node != *node && !seen.contains(&new_node) {
-                    seen.insert(new_node.clone());
-                    next_level.push(new_node);
+                if child != *node && seen.insert(child.clone()) {
+                    next.push(child);
                 }
             }
         }
 
-        if next_level.is_empty() {
+        if next.is_empty() {
             break;
         }
-
-        tree.push(next_level);
+        tree.push(next);
     }
 
     tree
 }
 
 /// ===============================
-/// Merge histogram (Python-equivalent)
+/// Merge histogram (Python-exact)
 /// ===============================
 fn merge_histogram(hist: &ArrayD<i64>, rf: &[usize]) -> ArrayD<i64> {
-    let mut merged = hist.clone();
-
-    for (axis, &group) in rf.iter().enumerate() {
-        let size = merged.shape()[axis];
-        let pad = (group - (size % group)) % group;
-
-        if pad > 0 {
-            let mut new_shape = merged.shape().to_vec();
-            new_shape[axis] += pad;
-
-            let mut padded = ArrayD::<i64>::zeros(IxDyn(&new_shape));
-            for (idx, v) in merged.indexed_iter() {
-                padded[idx.clone()] = *v;
-            }
-            merged = padded;
-        }
-
-        let mut reshaped = merged.shape().to_vec();
-        reshaped[axis] /= group;
-        reshaped.insert(axis + 1, group);
-
-        merged = merged
-            .into_shape(IxDyn(&reshaped))
-            .unwrap()
-            .sum_axis(Axis(axis + 1));
+    let ndim = hist.ndim();
+    let mut out_shape = Vec::with_capacity(ndim);
+    for (axis, &bw) in rf.iter().enumerate() {
+        let size = hist.shape()[axis];
+        let bins = (size + bw - 1) / bw;
+        out_shape.push(bins);
     }
 
-    merged
+    let mut out = ArrayD::<i64>::zeros(IxDyn(&out_shape));
+    let mut out_idx = vec![0usize; ndim];
+
+    for (idx, v) in hist.indexed_iter() {
+        for i in 0..ndim {
+            out_idx[i] = idx[i] / rf[i];
+        }
+        *out.get_mut(IxDyn(&out_idx)).unwrap() += *v;
+    }
+
+    out
 }
 
-
 /// ===============================
-/// Python-exact k + suppression logic
+/// k-anonymity + suppression
 /// ===============================
 fn passes_k_or_suppression(
     hist: &ArrayD<i64>,
@@ -121,30 +110,29 @@ fn passes_k_or_suppression(
     }
 
     let allowed =
-        (suppression_limit * total_records as f64 / 100.0).floor() as usize;
+        (suppression_limit * total_records as f64).floor() as usize;
 
     suppressed <= allowed
 }
 
 /// ===============================
-/// Compute DM* + eq classes
+/// DM* metric (Python exact)
 /// ===============================
 fn compute_dm_star(hist: &ArrayD<i64>, k: usize) -> (i64, usize) {
     let mut dm = 0i64;
     let mut eq = 0usize;
-    let mut sup = 0i64;
+    let mut suppressed = 0i64;
 
     for &v in hist.iter() {
         if (v as usize) >= k {
             dm += v * v;
             eq += 1;
-        }
-        else {
-            sup += v;
+        } else {
+            suppressed += v;
         }
     }
-    dm += sup * sup;
-    eq += 1;
+
+    dm += suppressed * suppressed;
     (dm, eq)
 }
 
@@ -153,76 +141,54 @@ fn main() {
     // Load Python input
     // ---------------------------
     let input: PythonInput = serde_json::from_str(
-        &fs::read_to_string("debug/python_result.json")
-            .expect("Missing python_result.json"),
+        &fs::read_to_string("debug/python_result.json").unwrap(),
     )
-    .expect("Invalid python_result.json");
+    .unwrap();
 
     // ---------------------------
     // Load histogram
     // ---------------------------
-    let shape: Vec<usize> = serde_json::from_str(
-        &fs::read_to_string("debug/global_hist_shape.json").unwrap(),
-    )
-    .unwrap();
+    let shape: Vec<usize> =
+        serde_json::from_str(&fs::read_to_string("debug/global_hist_shape.json").unwrap()).unwrap();
+    let flat: Vec<i64> =
+        serde_json::from_str(&fs::read_to_string("debug/global_hist_flat.json").unwrap()).unwrap();
 
-    let flat: Vec<i64> = serde_json::from_str(
-        &fs::read_to_string("debug/global_hist_flat.json").unwrap(),
-    )
-    .unwrap();
-
-    let base_hist =
-        ArrayD::from_shape_vec(IxDyn(&shape), flat).unwrap();
+    let base_hist = ArrayD::from_shape_vec(IxDyn(&shape), flat).unwrap();
 
     // ---------------------------
-    // Build lattice (LEVEL ORDER)
+    // Build lattice
     // ---------------------------
-    let tree = build_lattice_levels(
-        &input.initial_ri,
-        &input.max_levels,
-    );
-
-    // ---------------------------
-    // Evaluate all nodes (Python logic)
-    // ---------------------------
-    let mut pass_nodes = Vec::new();
-    println!("max levels: {:?}", input.max_levels);
-    println!("Lattice : {:?}", tree);
-    for level in &tree {
-        for rf in level {
-            let merged = merge_histogram(&base_hist, rf);
-
-            if passes_k_or_suppression(
-                &merged,
-                input.k,
-                input.suppression_limit,
-                input.total_records,
-            ) {
-                pass_nodes.push(rf.clone());
-            }
-        }
-    }
-
-    // ---------------------------
-    // Select best RF via DM*
-    // ---------------------------
+    let start = Instant::now();
+    println!("Started time ,{:?}", start);
+    let tree = build_lattice_levels(&input.initial_ri, &input.max_levels);
+    println!("time to build tree: {:.6} seconds", start.elapsed().as_secs_f64());
     let mut best_rf = None;
     let mut best_dm = i64::MAX;
     let mut best_eq = None;
+    println!("Time to init loop: {:.6} seconds", start.elapsed().as_secs_f64());
+    for rf in tree.iter().flatten() {
+        let merged = merge_histogram(&base_hist, rf);
+        let pass = passes_k_or_suppression(
+            &merged,
+            input.k,
+            input.suppression_limit,
+            input.total_records,
+        );
 
-    for rf in pass_nodes {
-        let merged = merge_histogram(&base_hist, &rf);
-        let (dm, eq) = compute_dm_star(&merged, input.k);
-
-        if dm < best_dm {
-            best_dm = dm;
-            best_rf = Some(rf);
-            best_eq = Some(eq);
+        if pass {
+            let (dm, eq) = compute_dm_star(&merged, input.k);
+            if dm < best_dm {
+                best_dm = dm;
+                best_rf = Some(rf.clone());
+                best_eq = Some(eq);
+            }
         }
     }
-
+    println!("Time to mark status at get best RF: {:.6} seconds", start.elapsed().as_secs_f64());
+    let elapsed = start.elapsed();
+    println!("Elapsed time: {:.6} seconds", elapsed.as_secs_f64());
     // ---------------------------
-    // Write Rust result
+    // Write result
     // ---------------------------
     let result = RustResult {
         best_rf,
@@ -232,6 +198,7 @@ fn main() {
             Some(best_dm)
         },
         num_equivalence_classes: best_eq,
+        elapsed_time: elapsed.as_secs_f64(),
     };
 
     fs::write(

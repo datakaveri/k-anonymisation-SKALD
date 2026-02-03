@@ -44,7 +44,7 @@ class OLA_2:
         if total_records <= 0:
             raise ValueError("total_records must be > 0")
 
-        if not (0 <= suppression_limit <= 100):
+        if not (0 <= suppression_limit <= 1):
             raise ValueError("suppression_limit must be in [0,100]")
 
         if enable_l_diversity and not sensitive_parameter:
@@ -140,7 +140,6 @@ class OLA_2:
 
         shape = []
         num_bin_info = []
-
         for qi, dom, bw in zip(self.quasi_identifiers, self.domains, bin_widths):
             if qi.is_categorical:
                 shape.append(len(dom))
@@ -157,16 +156,10 @@ class OLA_2:
 
         histogram = np.zeros(shape, dtype=int)
 
-        self.sensitive_sets = np.empty(shape, dtype=object)
-        for idx in np.ndindex(*shape):
-            self.sensitive_sets[idx] = set()
-
         for _, row in chunk.iterrows():
             try:
                 idx = self._get_bin_index(row, bin_widths, num_bin_info)
                 histogram[idx] += 1
-                if self.enable_l_diversity:
-                    self.sensitive_sets[idx].add(row[self.sensitive_parameter])
             except Exception:
                 continue
 
@@ -208,7 +201,6 @@ class OLA_2:
 
         pass_nodes = []
         base_hist = histogram.copy()
-        base_sets = self.sensitive_sets.copy()
 
         total_nodes = sum(len(level) for level in self.tree)
         pbar = tqdm(total=total_nodes, desc="Evaluating nodes", unit="node")
@@ -220,18 +212,18 @@ class OLA_2:
                     pbar.update(1)
                     continue
 
-                merged_hist, merged_sets = self.merge_equivalence_classes(
-                    base_hist.copy(), base_sets.copy(), node
+                merged_hist= self.merge_equivalence_classes(
+                    base_hist.copy(), node
                 )
-
                 passes = self.check_k_anonymity(merged_hist, k, l)
                 if passes or self.suppression_count <= (
-                    self.suppression_limit * self.total_records / 100
+                    self.suppression_limit * self.total_records
                 ):
 
                     self.node_status[key] = "pass"
                     pass_nodes.append(node)
                 else:
+
                     self.node_status[key] = "fail"
 
                 pbar.update(1)
@@ -241,7 +233,7 @@ class OLA_2:
         if not pass_nodes:
             raise ValueError("No node satisfies k-anonymity constraints")
 
-        self.find_best_rf(base_hist, pass_nodes, k, l, base_sets)
+        self.find_best_rf(base_hist, pass_nodes, k)
         return self.smallest_passing_rf
 
     # ------------------------------------------------------------------
@@ -255,35 +247,32 @@ class OLA_2:
         if self.suppression_count > 0:
             return False
 
-        if self.enable_l_diversity:
-            for idx in np.ndindex(histogram.shape):
-                if histogram[idx] > 0 and len(self.sensitive_sets[idx]) < l:
-                    self.suppression_count += histogram[idx]
-                    return False
-
         return True
 
     # ------------------------------------------------------------------
     # Metrics & stats (REQUIRED by core.py)
     # ------------------------------------------------------------------
     def get_equivalence_class_stats(self, histogram, bin_widths, k):
-        if histogram is None or self.sensitive_sets is None:
-            raise RuntimeError("Histogram or sensitive_sets not initialized")
+        if histogram  is None:
+            raise RuntimeError("Histogram  not initialized")
 
-        merged_hist, _ = self.merge_equivalence_classes(
-            histogram, self.sensitive_sets, bin_widths
+        merged_hist = self.merge_equivalence_classes(
+            histogram, bin_widths
         )
-
+        temp = 0
         stats = defaultdict(int)
         for count in merged_hist.flatten():
             if count >= k:
                 stats[int(count)] += 1
-
+            else:
+                temp += count
+        if temp > 0:
+            stats[int(temp)] += 1
         return dict(stats)
 
     def get_suppressed_percent(self, node, histogram, k):
-        merged_hist, _ = self.merge_equivalence_classes(
-            histogram, self.sensitive_sets, list(node)
+        merged_hist = self.merge_equivalence_classes(
+            histogram, list(node)
         )
         suppressed = np.sum((merged_hist > 0) & (merged_hist < k))
         return (suppressed / self.total_records) * 100
@@ -291,55 +280,39 @@ class OLA_2:
     # ------------------------------------------------------------------
     # Histogram merging helpers
     # ------------------------------------------------------------------
-    def merge_equivalence_classes(self, histogram, sensitive_sets, node):
+    def merge_equivalence_classes(self, histogram, node):
         merged_hist = histogram
-        merged_sets = sensitive_sets
 
-        for axis, (qi, level) in enumerate(zip(self.quasi_identifiers, node)):
-            group = max(1, int(level))
-            merged_hist = self._merge_axis(merged_hist, axis, group)
-            merged_sets = self._merge_sets_axis(merged_sets, axis, group)
-
-        self.sensitive_sets = merged_sets
-        return merged_hist, merged_sets
+        for axis, (qi, bw) in enumerate(zip(self.quasi_identifiers, node)):
+            bw = int(bw)
+            merged_hist = self._merge_axis(merged_hist, axis, bw)
+        return merged_hist
 
     @staticmethod
-    def _merge_axis(arr, axis, group):
-        pad = (-arr.shape[axis]) % group
+    def _merge_axis(arr, axis, bw):
+        remainder = arr.shape[axis] % bw
+        pad = (bw - remainder) % bw
         if pad:
             pad_shape = list(arr.shape)
             pad_shape[axis] = pad
             arr = np.concatenate((arr, np.zeros(pad_shape, dtype=int)), axis=axis)
 
-        new_shape = arr.shape[:axis] + (-1, group) + arr.shape[axis + 1 :]
+        new_shape = arr.shape[:axis] + (-1, bw) + arr.shape[axis + 1 :]
         return np.sum(arr.reshape(new_shape), axis=axis + 1)
 
-    @staticmethod
-    def _merge_sets_axis(arr, axis, group):
-        new_shape = list(arr.shape)
-        new_shape[axis] = math.ceil(arr.shape[axis] / group)
-        out = np.empty(new_shape, dtype=object)
-        for idx in np.ndindex(*new_shape):
-            out[idx] = set()
-
-        for idx in np.ndindex(arr.shape):
-            new_idx = list(idx)
-            new_idx[axis] //= group
-            out[tuple(new_idx)] |= arr[idx]
-
-        return out
 
     # ------------------------------------------------------------------
     # RF selection
     # ------------------------------------------------------------------
-    def find_best_rf(self, histogram, pass_nodes, k, l, sensitive_sets):
+    def find_best_rf(self, histogram, pass_nodes, k):
         for node in pass_nodes:
-            merged_hist, _ = self.merge_equivalence_classes(
-                histogram.copy(), sensitive_sets.copy(), node
+            merged_hist = self.merge_equivalence_classes(
+                histogram.copy(), list(node)
             )
 
             dm_star = np.sum(merged_hist[merged_hist >= k] ** 2)
-
+            temp = np.sum(merged_hist[merged_hist < k])
+            dm_star += temp ** 2
             if dm_star < self.lowest_dm_star:
                 self.lowest_dm_star = dm_star
                 self.smallest_passing_rf = node

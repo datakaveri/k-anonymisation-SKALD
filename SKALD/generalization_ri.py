@@ -123,7 +123,7 @@ class OLA_1:
 
                         factor = self.multiplication_factors[col]
                         max_val = qi.get_range()
-                        new_node[i] = min(new_node[i] * factor, max_val)
+                        new_node[i] = min((new_node[i] * factor), (max_val))
 
                     t = tuple(new_node)
                     if t not in self.node_status:

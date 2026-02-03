@@ -264,7 +264,7 @@ def run_pipeline(
             message="Numerical encoding failed",
             details=str(e)
         )
-
+#stopped here------------------------------------------------------------------------------------------------------
     # ------------------------------------------------------------------
     # 8. Build quasi-identifiers
     # ------------------------------------------------------------------
@@ -288,8 +288,8 @@ def run_pipeline(
     try:
         n = len(chunk_files)
         available_ram = psutil.virtual_memory().available
-        max_eq = max(1, available_ram // 10_000)
-
+        max_eq = max(1, available_ram // 16)
+        print(f"Available RAM: {available_ram} bytes, Max EQ: {max_eq}")
         ola_1 = OLA_1(
             quasi_identifiers,
             n,
@@ -299,13 +299,14 @@ def run_pipeline(
         ola_1.build_tree()
         ola_1.find_smallest_passing_ri()
         initial_ri = ola_1.get_optimal_ri()
+        initial_ri = [int(v) for v in initial_ri]
     except Exception as e:
         raise SKALDError(
             code="GENERALIZATION_FAILED",
             message="OLA_1 failed",
             details=str(e)
         )
-
+    print(f"Initial Ri: {initial_ri}")
     # ------------------------------------------------------------------
     # 10. OLA-2 
     # ------------------------------------------------------------------
@@ -322,7 +323,7 @@ def run_pipeline(
             enable_l_diversity=config.enable_l_diversity
         )
 
-        ola_2.build_tree(initial_ri)
+        
 
         histograms = process_chunks_for_histograms(
             chunk_files,
@@ -332,8 +333,11 @@ def run_pipeline(
             ola_2,
             initial_ri
         )
-
+        start_time = time.time()
+        ola_2.build_tree(initial_ri)
+        print("Time taken to build OLA2 tree: {:.6} seconds".format(time.time() - start_time))
         global_hist = ola_2.merge_histograms(histograms)
+        print("Time taken to merge histograms: {:.6} seconds".format(time.time() - start_time))
 
         
         final_rf = ola_2.get_final_binwidths(
@@ -341,14 +345,15 @@ def run_pipeline(
             config.k,
             config.l if config.enable_l_diversity else 1
         )
-
+        print("Time taken to compute final RF: {:.6} seconds".format(time.time() - start_time))
         lowest_dm_star = ola_2.lowest_dm_star
         num_eq_classes = ola_2.best_num_eq_classes
         eq_class_stats = ola_2.get_equivalence_class_stats(global_hist, final_rf, config.k)
-
+        print("Time taken to compute DM*: {:.6} seconds".format(time.time() - start_time))
+        time_OLA2 = time.time() - start_time
 
         # ---------------------------------------------
-        # DEBUG: dump histogram + sensitive sets for Rust parity
+        # DEBUG: dump histogram  for Rust parity
         # ---------------------------------------------
        
 
@@ -361,17 +366,6 @@ def run_pipeline(
         with open("debug/global_hist_flat.json", "w") as f:
             json.dump([int(x) for x in global_hist.flatten()], f)
 
-        # Sensitive sets
-        sens = ola_2.sensitive_sets
-        with open("debug/sensitive_sets_shape.json", "w") as f:
-            json.dump([int(x) for x in sens.shape], f)
-
-        flat_sets = []
-        for idx in np.ndindex(sens.shape):
-            flat_sets.append([str(x) for x in sens[idx]])
-
-        with open("debug/sensitive_sets_flat.json", "w") as f:
-            json.dump(flat_sets, f)
         max_level = [compute_max_levels(qi.get_range()) for qi in quasi_identifiers]
         # Ground truth
         with open("debug/python_result.json", "w") as f:
@@ -381,10 +375,11 @@ def run_pipeline(
                 "final_rf": [int(x) for x in final_rf],
                 "lowest_dm_star": int(ola_2.lowest_dm_star),
                 "num_equivalence_classes": int(ola_2.best_num_eq_classes),
-                "k": 32,
+                "k": int(config.k),
                 "l": int(config.l if config.enable_l_diversity else 1),
                 "suppression_limit": float(config.suppression_limit),
-                "total_records": int(total_records)
+                "total_records": int(total_records),
+                "time_OLA2_seconds": float(time_OLA2)
             }, f, indent=2)
 
     except Exception as e:
@@ -553,6 +548,6 @@ if __name__ == "__main__":
     with open(status_path, "w") as f:
         json.dump(make_json_safe(response), f, indent=2)
 
-    print(json.dumps(make_json_safe(response), indent=2))
+   #print(json.dumps(make_json_safe(response), indent=2))
     
 

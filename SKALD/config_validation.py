@@ -17,7 +17,7 @@ class NumericalQuasiIdentifier(BaseModel):
     column: str
     scale: Optional[bool] = None
     s: Optional[int] = 0
-    encode: bool
+    encode: Optional[bool] = None
     type: str
 
     @field_validator("type")

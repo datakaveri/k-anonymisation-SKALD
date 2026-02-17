@@ -3,7 +3,7 @@ Configuration schema and validation logic for the SKALD pipeline.
 """
 
 from pydantic import BaseModel, Field, condecimal, field_validator, model_validator, ValidationError
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import os
 import yaml
 import logging
@@ -77,7 +77,10 @@ class Config(BaseModel):
     hashing_with_salt: List[str] = Field(default_factory=list)
     hashing_without_salt: List[str] = Field(default_factory=list)
     masking: List[Dict] = Field(default_factory=list)
-    encrypt: List[str] = Field(default_factory=list)
+    charcloak: List[str] = Field(default_factory=list)
+    tokenization: List[Dict] = Field(default_factory=list)
+    fpe: List[Dict] = Field(default_factory=list)
+    encrypt: List[Any] = Field(default_factory=list)
 
     enable_k_anonymity: bool = True
     enable_l_diversity: bool = False

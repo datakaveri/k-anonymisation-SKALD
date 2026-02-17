@@ -71,6 +71,28 @@ def process_chunks_for_histograms(
             s = int(info.get("s", 0)) if scale else 0
             encode = info.get("encode", False)
             col_type = info.get("type")
+            if column not in working_chunk.columns:
+                raise KeyError(
+                    f"Column '{column}' missing in chunk '{filename}' during numerical processing"
+                )
+
+            raw_vals = working_chunk[column]
+            if raw_vals.dtype == object:
+                raw_vals = raw_vals.replace(r"^\s*$", np.nan, regex=True)
+
+            numeric_vals = pd.to_numeric(raw_vals, errors="coerce")
+            non_numeric = raw_vals.notna().sum() - numeric_vals.notna().sum()
+            if non_numeric > 0:
+                logger.warning(
+                    "Column '%s' has %d non-numeric value(s) in chunk '%s' that will be ignored for numerical processing.",
+                    column,
+                    non_numeric,
+                    filename,
+                )
+            if numeric_vals.notna().sum() == 0:
+                raise ValueError(
+                    f"Column '{column}' has no valid numeric values in chunk '{filename}'"
+                )
 
             # -----------------------------
             # Scaling
@@ -80,16 +102,18 @@ def process_chunks_for_histograms(
                     if s < 0:
                         raise ValueError("s must be a non-negative integer for integer scaling")
                     else:
-                        scaled = np.floor(working_chunk[column] / (10 ** s)).astype(int)
+                        scaled = pd.Series(
+                            np.floor(numeric_vals / (10 ** s)),
+                            index=numeric_vals.index,
+                        ).astype("Int64")
                         if encode:
                             enc_info = encoding_maps[column]
                             enc_map = enc_info.get("encoding_map")
-                            values = scaled.astype(int)
+                            values = scaled
                             encoded = values.map(enc_map)
                             working_chunk[f"{column}_scaled_encoded"] = encoded
                         else:
-                            values = scaled.astype(int)
-                            working_chunk[f"{column}_scaled"] = values
+                            working_chunk[f"{column}_scaled"] = scaled
 
                 else:
                     if s <= 0:
@@ -98,31 +122,31 @@ def process_chunks_for_histograms(
                                 f"Scaling with non-positive s not allowed for float column '{column}' without encoding"
                             )
                         else:
-                            scaled = np.floor(working_chunk[column] / (10 ** s))
+                            scaled = pd.Series(
+                                np.floor(numeric_vals / (10 ** s)),
+                                index=numeric_vals.index,
+                            ).astype("Int64")
                             enc_info = encoding_maps[column]
                             enc_map = enc_info.get("encoding_map")
-                            values = scaled.astype(int)
+                            values = scaled
                             encoded = values.map(enc_map)
                             working_chunk[f"{column}_scaled_encoded"] = encoded 
                     else:
-                        scaled = np.floor(working_chunk[column] / (10 ** s))
+                        scaled = pd.Series(
+                            np.floor(numeric_vals / (10 ** s)),
+                            index=numeric_vals.index,
+                        ).astype("Int64")
                         if encode:
                             enc_info = encoding_maps[column]
                             enc_map = enc_info.get("encoding_map")
-                            values = scaled.astype(int)
+                            values = scaled
                             encoded = values.map(enc_map)
                             working_chunk[f"{column}_scaled_encoded"] = encoded
                         else:
-                            values = scaled.astype(int)
-                            working_chunk[f"{column}_scaled"] = values
+                            working_chunk[f"{column}_scaled"] = scaled
 
             else:
                 if encode:
-                    if column not in working_chunk.columns:
-                        raise KeyError(
-                            f"Column '{column}' missing in chunk '{filename}' during encoding"
-                        )
-
                     if column not in encoding_maps:
                         raise KeyError(
                             f"Encoding map missing for encoded column '{column}'"
@@ -137,7 +161,7 @@ def process_chunks_for_histograms(
                         )
 
                     try:
-                        values = working_chunk[column].astype(int)
+                        values = numeric_vals.astype("Int64")
                         encoded = values.map(enc_map)
                         logger.info("Applied integer encoding for column '%s'", column)
                     except Exception as e:
@@ -145,12 +169,15 @@ def process_chunks_for_histograms(
                             f"Failed converting values for encoding column '{column}': {e}"
                         )
 
-                    if encoded.isna().any():
+                    if (encoded.isna() & values.notna()).any():
                         raise ValueError(
                             f"Found values in '{column}' not present in encoding_map"
                         )
 
                     working_chunk[f"{column}_encoded"] = encoded
+                else:
+                    # Ensure unencoded numeric columns are numeric for downstream histogramming
+                    working_chunk[column] = numeric_vals
 
         # Persist scaled / encoded columns for later generalization
         working_chunk.to_csv(file_path, index=False)

@@ -145,7 +145,7 @@ class OLA_1:
 
             self.tree.append(next_level)
             level += 1
-
+        
         return self.tree
 
     # ------------------------------------------------------------------

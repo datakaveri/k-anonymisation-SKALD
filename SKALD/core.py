@@ -23,7 +23,15 @@ from SKALD.chunk_processing import process_chunks_for_histograms
 from SKALD.generalize_chunk import generalize_single_chunk
 from SKALD.build_QI import build_quasi_identifiers
 from SKALD.chunking import split_csv_by_ram
-from SKALD.preprocess import suppress, encrypt_columns, hash_columns, mask_columns
+from SKALD.preprocess import (
+    suppress,
+    encrypt_columns,
+    hash_columns,
+    mask_columns,
+    charcloak_columns,
+    fpe_encrypt_columns,
+    tokenize_columns,
+)
 from SKALD.SKALDError import SKALDError
 from SKALD.logging_config import setup_logging
 from SKALD.combine_chunks import combine_generalized_chunks 
@@ -200,6 +208,12 @@ def run_pipeline(
                 df = hash_columns(df, config.hashing_with_salt, config.hashing_without_salt)
             if config.masking:
                 df = mask_columns(df, config.masking)
+            if config.charcloak:
+                df = charcloak_columns(df, config.charcloak)
+            if config.tokenization:
+                df = tokenize_columns(df, config.tokenization, config.output_directory)
+            if config.fpe:
+                df = fpe_encrypt_columns(df, config.fpe, config.output_directory)
             if config.encrypt:
                 df = encrypt_columns(df, config.encrypt, config.output_directory)
 
@@ -285,8 +299,7 @@ def run_pipeline(
     try:
         n = len(chunk_files)
         available_ram = psutil.virtual_memory().available
-        max_eq = max(1, available_ram // 10_000)
-
+        max_eq = max(1, available_ram // 32)
         ola_1 = OLA_1(
             quasi_identifiers,
             n,
@@ -469,6 +482,9 @@ def _entry_main() -> str:
         "hashing_with_salt": conf.get("hashing_with_salt", []),
         "hashing_without_salt": conf.get("hashing_without_salt", []),
         "masking": conf.get("masking", []),
+        "charcloak": conf.get("charcloak", []),
+        "tokenization": conf.get("tokenization", []),
+        "fpe": conf.get("fpe", []),
         "encrypt": conf.get("encrypt", []),
         "quasi_identifiers": conf.get("quasi_identifiers", {}),
         "k": conf.get("k_anonymize", {}).get("k", 1),
@@ -514,4 +530,3 @@ if __name__ == "__main__":
 
     print(json.dumps(make_json_safe(response), indent=2))
     
-

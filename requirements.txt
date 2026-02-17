@@ -8,5 +8,6 @@ flask_cors
 requests
 psutil
 cryptography
+pyffx
 pytest
 pytest-cov  

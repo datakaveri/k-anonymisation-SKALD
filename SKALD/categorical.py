@@ -24,8 +24,8 @@ class CategoricalGeneralizer:
                 }
             },
             "gender": {
-                1: {"Male": "Male", "Female": "Female"},
-                2: {"Male": "*", "Female": "*"}
+                1: {"Male": "Male", "Female": "Female", "Others": "Others"},
+                2: {"Male": "*", "Female": "*", "Others": "*"}
             },
             "profession": {
                 1: lambda x: x,

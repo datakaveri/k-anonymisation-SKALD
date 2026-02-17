@@ -411,7 +411,8 @@ class OLA_2:
 
         gen_chunk = chunk.copy(deep=False)
 
-        for qi, bw, s in zip(self.quasi_identifiers, bin_widths, s_list):
+        for idx, (qi, bw) in enumerate(zip(self.quasi_identifiers, bin_widths)):
+            s = int(s_list[idx]) if idx < len(s_list) else 0
             col = qi.column_name
 
             # -------------------------
@@ -419,14 +420,15 @@ class OLA_2:
             # -------------------------
             if qi.is_categorical:
                 level = int(bw)
-                mapping = {
-                    "Blood Group": self.categorical_generalizer.generalize_blood_group,
-                    "Gender": self.categorical_generalizer.generalize_gender
-                }
-                mapper = mapping.get(
-                    qi.column_name,
-                    self.categorical_generalizer.generalize_profession
-                )
+                col_key = qi.column_name.strip().lower()
+                if col_key == "blood group":
+                    mapper = self.categorical_generalizer.generalize_blood_group
+                elif col_key == "gender":
+                    mapper = self.categorical_generalizer.generalize_gender
+                elif col_key == "profession":
+                    mapper = self.categorical_generalizer.generalize_profession
+                else:
+                    mapper = lambda x, _: x
                 gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
                 continue
 

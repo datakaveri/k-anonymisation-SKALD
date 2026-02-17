@@ -335,7 +335,7 @@ def run_pipeline(
 
         ola_2.build_tree(initial_ri)
 
-        histograms = process_chunks_for_histograms(
+        global_hist = process_chunks_for_histograms(
             chunk_files,
             chunk_dir,
             numerical_columns_info,
@@ -343,8 +343,6 @@ def run_pipeline(
             ola_2,
             initial_ri
         )
-
-        global_hist = ola_2.merge_histograms(histograms)
         final_rf = ola_2.get_final_binwidths(
             global_hist,
             config.k,
@@ -356,6 +354,7 @@ def run_pipeline(
         eq_class_stats = ola_2.get_equivalence_class_stats(global_hist, final_rf, config.k)
 
     except Exception as e:
+        logger.exception("OLA_2 failed with exception: %s", e)
         raise SKALDError(
             code="GENERALIZATION_FAILED",
             message="OLA_2 failed",
@@ -382,6 +381,12 @@ def run_pipeline(
             )
 
         combine_generalized_chunks(config.output_directory, config.output_path)
+
+        # Write equivalence class stats separately
+        _ensure_dir(config.output_directory)
+        stats_path = os.path.join(config.output_directory, "equivalence_class_stats.json")
+        with open(stats_path, "w") as f:
+            json.dump(make_json_safe(eq_class_stats), f, indent=2)
     except Exception as e:
         raise SKALDError(
             code="GENERALIZATION_FAILED",

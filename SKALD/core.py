@@ -352,6 +352,7 @@ def run_pipeline(
         lowest_dm_star = ola_2.lowest_dm_star
         num_eq_classes = ola_2.best_num_eq_classes
         eq_class_stats = ola_2.get_equivalence_class_stats(global_hist, final_rf, config.k)
+        top_ola2_nodes = ola_2.get_top_rf_nodes(5)
 
     except Exception as e:
         logger.exception("OLA_2 failed with exception: %s", e)
@@ -387,6 +388,10 @@ def run_pipeline(
         stats_path = os.path.join(config.output_directory, "equivalence_class_stats.json")
         with open(stats_path, "w") as f:
             json.dump(make_json_safe(eq_class_stats), f, indent=2)
+
+        top_nodes_path = os.path.join(config.output_directory, "top_ola2_nodes.json")
+        with open(top_nodes_path, "w") as f:
+            json.dump(make_json_safe(top_ola2_nodes), f, indent=2)
     except Exception as e:
         raise SKALDError(
             code="GENERALIZATION_FAILED",
@@ -408,6 +413,32 @@ def run_pipeline_safe(config_path: str) -> dict:
 
     try:
         rf, elapsed, dm_star, num_eq, eq_stats = run_pipeline(config_path)
+
+        sample_rows = []
+        top_ola2_nodes = []
+        try:
+            cfg = load_config(config_path)
+
+            candidate_paths = []
+            if cfg.output_path:
+                candidate_paths.append(cfg.output_path)
+                if not os.path.isabs(cfg.output_path):
+                    candidate_paths.append(
+                        os.path.join(cfg.output_directory, os.path.basename(cfg.output_path))
+                    )
+
+            for out_csv in candidate_paths:
+                if os.path.isfile(out_csv):
+                    sample_rows = pd.read_csv(out_csv).head(10).to_dict(orient="records")
+                    break
+
+            top_nodes_path = os.path.join(cfg.output_directory, "top_ola2_nodes.json")
+            if os.path.isfile(top_nodes_path):
+                with open(top_nodes_path, "r") as f:
+                    top_ola2_nodes = json.load(f)
+        except Exception as e:
+            logger.warning("Failed to load sample output/top nodes into status response: %s", e)
+
         return make_json_safe({
             "status": "success",
             "outputs": {
@@ -415,7 +446,9 @@ def run_pipeline_safe(config_path: str) -> dict:
                 "elapsed_time_seconds": elapsed,
                 "lowest_dm_star": dm_star,
                 "num_equivalence_classes": num_eq,
-                "equivalence_class_stats": eq_stats
+                "equivalence_class_stats": eq_stats,
+                "top_ola2_nodes": top_ola2_nodes,
+                "sample_generalized_rows": sample_rows
             },
             "log_file": "log.txt"
         })
@@ -533,5 +566,5 @@ if __name__ == "__main__":
     with open(status_path, "w") as f:
         json.dump(make_json_safe(response), f, indent=2)
 
-    print(json.dumps(make_json_safe(response), indent=2))
+    #print(json.dumps(make_json_safe(response), indent=2))
     

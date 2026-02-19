@@ -68,6 +68,7 @@ class OLA_2:
         self.best_num_eq_classes = None
         self.best_suppression_count = None
         self.suppression_count = 0
+        self.top_rf_nodes = []
 
         self.categorical_generalizer = CategoricalGeneralizer()
 
@@ -452,7 +453,15 @@ class OLA_2:
     # ------------------------------------------------------------------
     # RF selection
     # ------------------------------------------------------------------
+    @staticmethod
+    def _get_suppression_count_for_histogram(hist, k: int) -> int:
+        if isinstance(hist, dict):
+            return int(sum(v for v in hist.values() if 0 < v < k))
+        return int(np.sum(hist[(hist > 0) & (hist < k)]))
+
     def find_best_rf(self, histogram, pass_nodes, k, l, sensitive_sets):
+        scored_nodes = []
+
         for node in pass_nodes:
             merged_hist, _ = self.merge_equivalence_classes(
                 histogram.copy(), sensitive_sets.copy(), node
@@ -465,10 +474,37 @@ class OLA_2:
                 dm_star = np.sum(merged_hist[merged_hist >= k] ** 2)
                 num_eq = int(np.sum(merged_hist >= k))
 
-            if dm_star < self.lowest_dm_star:
-                self.lowest_dm_star = dm_star
-                self.smallest_passing_rf = node
-                self.best_num_eq_classes = num_eq
+            suppression_count = self._get_suppression_count_for_histogram(merged_hist, k)
+
+            scored_nodes.append({
+                "node": [int(x) for x in node],
+                "dm_star": float(dm_star),
+                "num_equivalence_classes": int(num_eq),
+                "suppression_count": int(suppression_count),
+            })
+
+        scored_nodes.sort(
+            key=lambda x: (
+                x["dm_star"],
+                x["suppression_count"],
+                -x["num_equivalence_classes"],
+                x["node"],
+            )
+        )
+
+        self.top_rf_nodes = scored_nodes[:5]
+
+        if self.top_rf_nodes:
+            best = self.top_rf_nodes[0]
+            self.lowest_dm_star = best["dm_star"]
+            self.smallest_passing_rf = best["node"]
+            self.best_num_eq_classes = best["num_equivalence_classes"]
+            self.best_suppression_count = best["suppression_count"]
+
+    def get_top_rf_nodes(self, top_n: int = 5):
+        if top_n <= 0:
+            raise ValueError("top_n must be > 0")
+        return self.top_rf_nodes[:top_n]
 
 
     def generalize_chunk(self, chunk, bin_widths, s_list):

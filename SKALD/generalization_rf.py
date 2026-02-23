@@ -37,6 +37,10 @@ class OLA_2:
         multiplication_factors: dict,
         sensitive_parameter: str | None,
         enable_l_diversity: bool = True,
+        use_variance_il: bool = True,
+        lambda1: Optional[float] = 0.5,
+        lambda2: Optional[float] = 0.25,
+        lambda3: Optional[float] = 0.25,
     ):
         if not quasi_identifiers:
             raise ValueError("quasi_identifiers cannot be empty")
@@ -56,6 +60,10 @@ class OLA_2:
         self.multiplication_factors = multiplication_factors
         self.sensitive_parameter = sensitive_parameter
         self.enable_l_diversity = enable_l_diversity
+        self.use_variance_il = bool(use_variance_il)
+        self.lambda1 = 0.5 if lambda1 is None else float(lambda1)
+        self.lambda2 = 0.25 if lambda2 is None else float(lambda2)
+        self.lambda3 = 0.25 if lambda3 is None else float(lambda3)
 
         self.tree = []
         self.node_status = {}
@@ -69,8 +77,19 @@ class OLA_2:
         self.best_suppression_count = None
         self.suppression_count = 0
         self.top_rf_nodes = []
+        self.original_qi_df = None
+        self.domain_weights = []
+        self.max_dm_star = 1.0
+        self.max_precision_loss = 1.0
+        self.max_variance_il = 1.0
 
         self.categorical_generalizer = CategoricalGeneralizer()
+
+    def set_original_qi_df(self, df: pd.DataFrame):
+        if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+            self.original_qi_df = None
+            return
+        self.original_qi_df = df.copy()
 
     def get_base_column_name(self, col_name: str) -> str:
         if col_name.endswith("_scaled_encoded"):
@@ -459,38 +478,199 @@ class OLA_2:
             return int(sum(v for v in hist.values() if 0 < v < k))
         return int(np.sum(hist[(hist > 0) & (hist < k)]))
 
+    def _get_top_node(self) -> List[int]:
+        if not self.tree:
+            return []
+        dims = len(self.tree[0][0])
+        return [max(node[i] for level in self.tree for node in level) for i in range(dims)]
+
+    def _compute_domain_weights(self) -> List[float]:
+        if self.domain_weights:
+            return self.domain_weights
+
+        importances = []
+        for i, qi in enumerate(self.quasi_identifiers):
+            if self.domains and i < len(self.domains):
+                domain_size = max(1, len(self.domains[i]))
+            else:
+                if qi.is_categorical:
+                    domain_size = max(1, int(self._get_max_categorical_level(qi)))
+                else:
+                    domain_size = max(1, int(qi.get_range()))
+            importances.append(1.0 / math.log(domain_size + 1.0))
+
+        total = sum(importances)
+        if total <= 0:
+            self.domain_weights = [1.0 / len(self.quasi_identifiers)] * len(self.quasi_identifiers)
+        else:
+            self.domain_weights = [v / total for v in importances]
+        return self.domain_weights
+
+    def compute_precision_loss(self, generalization_vector: List[int]) -> float:
+        weights = self._compute_domain_weights()
+        loss = 0.0
+        for i, (qi, bw) in enumerate(zip(self.quasi_identifiers, generalization_vector)):
+            if qi.is_categorical:
+                max_level = max(1, int(self._get_max_categorical_level(qi)))
+                denom = max(1, max_level - 1)
+                level_loss = (max(1, int(bw)) - 1) / denom
+            else:
+                max_bw = max(1, int(qi.get_range()))
+                denom = max(1, max_bw - 1)
+                level_loss = (max(1, int(bw)) - 1) / denom
+            loss += weights[i] * min(1.0, max(0.0, float(level_loss)))
+        return float(loss)
+
+    def _make_group_keys(self, generalization_vector: List[int], df: pd.DataFrame) -> pd.DataFrame:
+        key_df = pd.DataFrame(index=df.index)
+        for i, (qi, bw) in enumerate(zip(self.quasi_identifiers, generalization_vector)):
+            col = qi.column_name
+            if col not in df.columns:
+                key_df[f"_g_{i}"] = -1
+                continue
+
+            if qi.is_categorical:
+                dom = self.domains[i] if self.domains and i < len(self.domains) else sorted(df[col].dropna().unique().tolist())
+                dom_map = {v: idx for idx, v in enumerate(dom)}
+                cat_idx = df[col].map(dom_map).fillna(-1).astype(int)
+                key_df[f"_g_{i}"] = (cat_idx // max(1, int(bw))).astype(int)
+            else:
+                series = pd.to_numeric(df[col], errors="coerce")
+                if self.domains and i < len(self.domains) and self.domains[i]:
+                    col_min = float(min(self.domains[i]))
+                else:
+                    col_min = float(series.min()) if series.notna().any() else 0.0
+                num_idx = ((series - col_min) // max(1, int(bw))).fillna(-1).astype(int)
+                key_df[f"_g_{i}"] = num_idx
+        return key_df
+
+    def compute_variance_il(self, generalization_vector: List[int], original_df: Optional[pd.DataFrame] = None) -> float:
+        if original_df is None:
+            original_df = self.original_qi_df
+        if original_df is None or original_df.empty:
+            return 0.0
+
+        weights = self._compute_domain_weights()
+        key_df = self._make_group_keys(generalization_vector, original_df)
+        group_keys = [tuple(row) for row in key_df.to_numpy()]
+        variance_il = 0.0
+
+        for i, qi in enumerate(self.quasi_identifiers):
+            if qi.is_categorical:
+                continue
+            col = qi.column_name
+            if col not in original_df.columns:
+                continue
+
+            col_vals = pd.to_numeric(original_df[col], errors="coerce")
+            temp = pd.DataFrame({
+                "_group": group_keys,
+                "_value": col_vals
+            })
+            temp = temp[temp["_value"].notna()]
+            if temp.empty:
+                continue
+
+            grouped = temp.groupby("_group")["_value"]
+            # SSE = variance(population) * count
+            sse = ((grouped.var(ddof=0).fillna(0.0) * grouped.count()).sum())
+            variance_il += weights[i] * float(sse)
+
+        return float(variance_il)
+
+    def _compute_dm_star_for_node(self, histogram, sensitive_sets, node, k: int) -> Tuple[float, int, int]:
+        merged_hist, _ = self.merge_equivalence_classes(
+            histogram.copy(), sensitive_sets.copy(), node
+        )
+
+        if self._is_sparse(merged_hist):
+            dm_star = float(sum(v * v for v in merged_hist.values() if v >= k))
+            num_eq = int(sum(1 for v in merged_hist.values() if v >= k))
+        else:
+            dm_star = float(np.sum(merged_hist[merged_hist >= k] ** 2))
+            num_eq = int(np.sum(merged_hist >= k))
+
+        suppression_count = self._get_suppression_count_for_histogram(merged_hist, k)
+        return dm_star, num_eq, suppression_count
+
+    @staticmethod
+    def _safe_normalize(value: float, max_value: float) -> float:
+        if max_value <= 0:
+            return 0.0
+        return min(1.0, max(0.0, float(value) / float(max_value)))
+
+    def _prepare_metric_normalizers(self, histogram, sensitive_sets, k: int):
+        top_node = self._get_top_node()
+        if not top_node:
+            self.max_dm_star = 1.0
+            self.max_precision_loss = 1.0
+            self.max_variance_il = 1.0
+            return
+
+        dm_star_top, _, _ = self._compute_dm_star_for_node(histogram, sensitive_sets, top_node, k)
+        precision_top = self.compute_precision_loss(top_node)
+        variance_top = self.compute_variance_il(top_node, self.original_qi_df) if self.use_variance_il else 0.0
+
+        self.max_dm_star = max(1.0, float(dm_star_top))
+        self.max_precision_loss = max(1e-9, float(precision_top))
+        self.max_variance_il = max(1e-9, float(variance_top)) if self.use_variance_il else 1.0
+
+    def compute_weighted_score(self, node: List[int], dm_star: float, precision_loss: float, variance_il: float) -> float:
+        ndm = self._safe_normalize(dm_star, self.max_dm_star)
+        nprec = self._safe_normalize(precision_loss, self.max_precision_loss)
+        nvar = self._safe_normalize(variance_il, self.max_variance_il) if self.use_variance_il else 0.0
+
+        if not self.use_variance_il:
+            return ndm
+
+        return (
+            self.lambda1 * ndm
+            + self.lambda2 * nprec
+            + self.lambda3 * nvar
+        )
+
     def find_best_rf(self, histogram, pass_nodes, k, l, sensitive_sets):
         scored_nodes = []
+        self._compute_domain_weights()
+        self._prepare_metric_normalizers(histogram, sensitive_sets, k)
 
         for node in pass_nodes:
-            merged_hist, _ = self.merge_equivalence_classes(
-                histogram.copy(), sensitive_sets.copy(), node
+            dm_star, num_eq, suppression_count = self._compute_dm_star_for_node(
+                histogram, sensitive_sets, node, k
             )
-
-            if self._is_sparse(merged_hist):
-                dm_star = sum(v * v for v in merged_hist.values() if v >= k)
-                num_eq = sum(1 for v in merged_hist.values() if v >= k)
-            else:
-                dm_star = np.sum(merged_hist[merged_hist >= k] ** 2)
-                num_eq = int(np.sum(merged_hist >= k))
-
-            suppression_count = self._get_suppression_count_for_histogram(merged_hist, k)
+            precision_loss = self.compute_precision_loss(node)
+            variance_il = self.compute_variance_il(node, self.original_qi_df) if self.use_variance_il else 0.0
+            weighted_score = self.compute_weighted_score(node, dm_star, precision_loss, variance_il)
 
             scored_nodes.append({
                 "node": [int(x) for x in node],
                 "dm_star": float(dm_star),
+                "precision_loss": float(precision_loss),
+                "variance_il": float(variance_il),
+                "weighted_score": float(weighted_score),
                 "num_equivalence_classes": int(num_eq),
                 "suppression_count": int(suppression_count),
             })
 
-        scored_nodes.sort(
-            key=lambda x: (
-                x["dm_star"],
-                x["suppression_count"],
-                -x["num_equivalence_classes"],
-                x["node"],
+        if self.use_variance_il:
+            scored_nodes.sort(
+                key=lambda x: (
+                    x["weighted_score"],
+                    x["dm_star"],
+                    x["suppression_count"],
+                    -x["num_equivalence_classes"],
+                    x["node"],
+                )
             )
-        )
+        else:
+            scored_nodes.sort(
+                key=lambda x: (
+                    x["dm_star"],
+                    x["suppression_count"],
+                    -x["num_equivalence_classes"],
+                    x["node"],
+                )
+            )
 
         self.top_rf_nodes = scored_nodes[:5]
 
@@ -500,6 +680,14 @@ class OLA_2:
             self.smallest_passing_rf = best["node"]
             self.best_num_eq_classes = best["num_equivalence_classes"]
             self.best_suppression_count = best["suppression_count"]
+            logger.info(
+                "Best OLA_2 node=%s dm_star=%.4f precision_loss=%.6f variance_il=%.6f weighted_score=%.6f",
+                best.get("node"),
+                float(best.get("dm_star", 0.0)),
+                float(best.get("precision_loss", 0.0)),
+                float(best.get("variance_il", 0.0)),
+                float(best.get("weighted_score", best.get("dm_star", 0.0))),
+            )
 
     def get_top_rf_nodes(self, top_n: int = 5):
         if top_n <= 0:

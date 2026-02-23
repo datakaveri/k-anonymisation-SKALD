@@ -330,7 +330,11 @@ def run_pipeline(
             config.suppression_limit,
             config.size or {},
             config.sensitive_parameter,
-            enable_l_diversity=config.enable_l_diversity
+            enable_l_diversity=config.enable_l_diversity,
+            use_variance_il=config.use_variance_il,
+            lambda1=config.lambda1,
+            lambda2=config.lambda2,
+            lambda3=config.lambda3,
         )
 
         ola_2.build_tree(initial_ri)
@@ -343,6 +347,21 @@ def run_pipeline(
             ola_2,
             initial_ri
         )
+
+        # Load QI-only original data for weighted scoring metrics.
+        qi_cols = [qi.column_name for qi in quasi_identifiers]
+        score_frames = []
+        for fname in chunk_files:
+            cpath = os.path.join(chunk_dir, fname)
+            if not os.path.isfile(cpath):
+                continue
+            try:
+                score_frames.append(pd.read_csv(cpath, usecols=lambda c: c in qi_cols))
+            except Exception:
+                score_frames.append(pd.read_csv(cpath)[qi_cols])
+        if score_frames:
+            ola_2.set_original_qi_df(pd.concat(score_frames, ignore_index=True))
+
         final_rf = ola_2.get_final_binwidths(
             global_hist,
             config.k,
@@ -530,6 +549,10 @@ def _entry_main() -> str:
         "sensitive_parameter": conf.get("sensitive_parameter"),
         "size": conf.get("size", {}),
         "suppression_limit": conf.get("suppression_limit", 0),
+        "use_variance_il": conf.get("use_variance_il", True),
+        "lambda1": conf.get("lambda1", 0.33),
+        "lambda2": conf.get("lambda2", 0.34),
+        "lambda3": conf.get("lambda3", 0.33),
     }
 
     tmp = tempfile.NamedTemporaryFile(

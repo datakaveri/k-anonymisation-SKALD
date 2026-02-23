@@ -72,6 +72,10 @@ class Config(BaseModel):
     k: Optional[int] = None
     l: Optional[int] = None
     suppression_limit: Optional[condecimal(ge=0, le=1)] = 0
+    use_variance_il: bool = True
+    lambda1: Optional[float] = 0.5
+    lambda2: Optional[float] = 0.25
+    lambda3: Optional[float] = 0.25
 
     suppress: List[str] = Field(default_factory=list)
     hashing_with_salt: List[str] = Field(default_factory=list)

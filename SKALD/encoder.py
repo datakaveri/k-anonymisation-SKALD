@@ -1,4 +1,5 @@
 import os
+import numpy as np
 import pandas as pd
 import json
 from typing import List, Dict, Tuple
@@ -82,34 +83,35 @@ def encode_numerical_columns(
                 raise KeyError(f"Column '{col}' not found in chunk '{filename}'")
 
             raw_vals = df[col]
-            vals = pd.to_numeric(raw_vals, errors="coerce")
-            invalid_count = int(vals.isna().sum() - raw_vals.isna().sum())
-            if invalid_count > 0:
+            if raw_vals.dtype == object:
+                raw_vals = raw_vals.replace(r"^\s*$", np.nan, regex=True)
+
+            numeric_vals = pd.to_numeric(raw_vals, errors="coerce")
+            non_numeric = raw_vals.notna().sum() - numeric_vals.notna().sum()
+            if non_numeric > 0:
                 logger.warning(
-                    "Column '%s' has %d non-numeric value(s) in chunk '%s' that will be ignored for numerical processing.",
+                    "Column '%s' has %d non-numeric value(s) in chunk '%s' that will be ignored for min/max.",
                     col,
-                    invalid_count,
+                    non_numeric,
                     filename,
                 )
 
-            vals = vals.dropna()
-            if vals.empty:
+            if info.get("scale", False):
+                s = int(info.get("s", 0))
+                numeric_vals = np.floor(numeric_vals / (10 ** s))
+
+            numeric_vals = numeric_vals.dropna()
+            if numeric_vals.empty:
                 continue
 
             # Update min/max
-            col_min = vals.min() if col_min is None else min(col_min, vals.min())
-            col_max = vals.max() if col_max is None else max(col_max, vals.max())
+            col_min = numeric_vals.min() if col_min is None else min(col_min, numeric_vals.min())
+            col_max = numeric_vals.max() if col_max is None else max(col_max, numeric_vals.max())
 
             # Collect values for encoding
             if encode:
-                if dtype == "float":
-                    decimals = find_max_decimal_places(vals)
-                    multiplier = 10 ** decimals
-                    vals = (vals * multiplier).round().astype("int64")
-                else:
-                    vals = vals.astype("int64")
-
-                all_vals.extend(vals.tolist())
+                vals_int = numeric_vals.astype("int64")
+                all_vals.extend(vals_int.tolist())
 
         # --------------------------------------------------
         # Validate min/max
@@ -117,12 +119,14 @@ def encode_numerical_columns(
         if col_min is None or col_max is None:
             raise ValueError(f"Column '{col}' has no valid numeric values")
 
-        dynamic_min_max[col] = [float(col_min), float(col_max)]
+        
+
 
         # --------------------------------------------------
         # Skip encoding if not required
         # --------------------------------------------------
         if not encode:
+            dynamic_min_max[col] = [col_min, col_max]
             continue
 
         if not all_vals:
@@ -155,5 +159,9 @@ def encode_numerical_columns(
             os.replace(tmp_file, encoding_file)
         except Exception as e:
             raise OSError(f"Failed to write encoding file for '{col}': {e}")
+        encoded_min = min(encoding_map.values())
+        encoded_max = max(encoding_map.values())
+        dynamic_min_max[col] = [encoded_min, encoded_max]
 
+        
     return encoding_maps, dynamic_min_max

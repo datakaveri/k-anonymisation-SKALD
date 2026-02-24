@@ -6,7 +6,7 @@ import os
 import numpy as np
 import pandas as pd
 from collections import defaultdict
-from typing import List
+from typing import List, Dict, Tuple, Optional
 from tqdm import tqdm
 import glob
 import logging
@@ -68,9 +68,54 @@ class OLA_2:
         self.best_num_eq_classes = None
         self.best_suppression_count = None
         self.suppression_count = 0
+        self.top_rf_nodes = []
 
         self.categorical_generalizer = CategoricalGeneralizer()
 
+    def get_base_column_name(self, col_name: str) -> str:
+        if col_name.endswith("_scaled_encoded"):
+            return col_name[:-15]
+        elif col_name.endswith("_encoded"):
+            return col_name[:-8]
+        elif col_name.endswith("_scaled"):
+            return col_name[:-7]
+        else:
+            return col_name
+
+    # ------------------------------------------------------------------
+    # Sparse histogram helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _is_sparse(histogram) -> bool:
+        return isinstance(histogram, dict)
+
+    @staticmethod
+    def _merge_sparse_histograms(h1: Dict[Tuple[int, ...], int],
+                                 h2: Dict[Tuple[int, ...], int]) -> Dict[Tuple[int, ...], int]:
+        out = dict(h1)
+        for k, v in h2.items():
+            out[k] = out.get(k, 0) + v
+        return out
+
+    @staticmethod
+    def _merge_sparse_equivalence_classes(
+        histogram: Dict[Tuple[int, ...], int],
+        sensitive_sets: Optional[Dict[Tuple[int, ...], set]],
+        node: List[int],
+    ) -> Tuple[Dict[Tuple[int, ...], int], Optional[Dict[Tuple[int, ...], set]]]:
+        merged_hist: Dict[Tuple[int, ...], int] = {}
+        merged_sets: Optional[Dict[Tuple[int, ...], set]] = {} if sensitive_sets is not None else None
+
+        for idx, count in histogram.items():
+            merged_idx = tuple(
+                max(0, idx[i] // max(1, int(node[i]))) for i in range(len(idx))
+            )
+            merged_hist[merged_idx] = merged_hist.get(merged_idx, 0) + count
+            if merged_sets is not None and sensitive_sets is not None:
+                if idx in sensitive_sets:
+                    merged_sets.setdefault(merged_idx, set()).update(sensitive_sets[idx])
+
+        return merged_hist, merged_sets
     # ------------------------------------------------------------------
     # Tree construction
     # ------------------------------------------------------------------
@@ -92,7 +137,7 @@ class OLA_2:
                         if new_node[i] < max_level:
                             new_node[i] += 1
                     else:
-                        base_col = qi.column_name[:-8] if qi.is_encoded else qi.column_name
+                        base_col = self.get_base_column_name(qi.column_name)
                         if base_col not in self.multiplication_factors:
                             raise KeyError(
                                 f"Missing multiplication factor for '{base_col}'"
@@ -118,36 +163,20 @@ class OLA_2:
         self.domains = []
 
         for qi in self.quasi_identifiers:
-            col = qi.column_name
-            if qi.is_encoded and not col.endswith("_encoded"):
-                col += "_encoded"
+            col = qi.column_name  # already effective column
 
             if col not in dataset.columns:
                 raise KeyError(f"Column '{col}' missing while building domains")
 
-            if qi.is_categorical:
-                values = dataset[col].dropna().unique().tolist()
-                if not values:
-                    raise ValueError(f"No valid values for column '{col}'")
-                self.domains.append(sorted(values))
-            else:
-                raw = dataset[col]
-                numeric = pd.to_numeric(raw, errors="coerce")
-                invalid_count = int(numeric.isna().sum() - raw.isna().sum())
-                if invalid_count > 0:
-                    logger.warning(
-                        "Column '%s' has %d non-numeric value(s) in domain build; they will be ignored.",
-                        col,
-                        invalid_count,
-                    )
+            values = dataset[col].dropna().unique().tolist()
 
-                values = numeric.dropna().unique().tolist()
-                if not values:
-                    raise ValueError(f"No valid numeric values for column '{col}'")
+            if not values:
+                raise ValueError(f"No valid values for column '{col}'")
 
                 self.domains.append(sorted(values))
 
-    def process_chunk(self, chunk: pd.DataFrame, bin_widths: List[int]) -> np.ndarray:
+
+    def process_chunk(self, chunk: pd.DataFrame, bin_widths: List[int]) -> dict:
         if not isinstance(chunk, pd.DataFrame) or chunk.empty:
             raise ValueError("chunk must be a non-empty DataFrame")
 
@@ -170,24 +199,26 @@ class OLA_2:
                 shape.append(n_bins)
                 num_bin_info.append((col_min, col_max, n_bins))
 
-        histogram = np.zeros(shape, dtype=int)
+        histogram: Dict[Tuple[int, ...], int] = {}
+        self.sensitive_sets = {}
 
         for _, row in chunk.iterrows():
             try:
                 idx = self._get_bin_index(row, bin_widths, num_bin_info)
-                histogram[idx] += 1
+                histogram[idx] = histogram.get(idx, 0) + 1
+                if self.enable_l_diversity:
+                    self.sensitive_sets.setdefault(idx, set()).add(row[self.sensitive_parameter])
             except Exception:
                 continue
 
         return histogram
 
+
     def _get_bin_index(self, row, bin_widths, num_bin_info):
         indices = []
 
         for i, (qi, bw) in enumerate(zip(self.quasi_identifiers, bin_widths)):
-            col = qi.column_name
-            if qi.is_encoded and not col.endswith("_encoded"):
-                col += "_encoded"
+            col = qi.column_name  # already effective column
 
             val = row[col]
 
@@ -205,17 +236,27 @@ class OLA_2:
 
         return tuple(indices)
 
+
     # ------------------------------------------------------------------
     # Histogram merging
     # ------------------------------------------------------------------
-    def merge_histograms(self, histograms: List[np.ndarray]) -> np.ndarray:
+    def merge_histograms(self, histograms):
         if not histograms:
             raise ValueError("No histograms to merge")
+
+        first = histograms[0]
+        if self._is_sparse(first):
+            merged = {}
+            for h in histograms:
+                merged = self._merge_sparse_histograms(merged, h)
+            return merged
+
         return np.sum(np.array(histograms), axis=0)
 
     # ------------------------------------------------------------------
     # RF evaluation
     # ------------------------------------------------------------------
+
     def get_final_binwidths(self, histogram, k: int, l: int):
         if histogram is None:
             raise ValueError("histogram cannot be None")
@@ -226,10 +267,22 @@ class OLA_2:
         total_nodes = sum(len(level) for level in self.tree)
         pbar = tqdm(total=total_nodes, desc="Evaluating nodes", unit="node")
 
-        for level in self.tree:
-            for node in level:
+        while any(v is None for v in self.node_status.values()):
+            histogram = base_hist.copy()
+            unmarked_levels = [i for i in range(len(self.tree)) if any(self.node_status.get(tuple(node)) is None for node in self.tree[i])]
+            if not unmarked_levels:
+                break
+            
+            mid_level = unmarked_levels[len(unmarked_levels) // 2]
+            sorted_nodes = sorted(
+                [node for node in self.tree[mid_level] if self.node_status[tuple(node)] is None], reverse=True
+            )
+
+            if sorted_nodes:
+                node = sorted_nodes[len(sorted_nodes) // 2]
                 key = tuple(node)
                 if self.node_status[key] is not None:
+                    print("Node %s already marked, skipping.", node)
                     pbar.update(1)
                     continue
 
@@ -240,12 +293,15 @@ class OLA_2:
                 if passes or self.suppression_count <= (
                     self.suppression_limit * self.total_records
                 ):
-
+                    logger.info("suppression_count for %s: %d", node, self.suppression_count)
                     self.node_status[key] = "pass"
                     pass_nodes.append(node)
+                    self._mark_subtree_pass(node, pbar)
+
                 else:
 
                     self.node_status[key] = "fail"
+                    self._mark_parents_fail(node, pbar)
 
                 pbar.update(1)
 
@@ -257,17 +313,63 @@ class OLA_2:
         self.find_best_rf(base_hist, pass_nodes, k)
         return self.smallest_passing_rf
 
+    def _mark_subtree_pass(self, node, pbar=None):
+        q = [node]
+        while q:
+            current = q.pop(0)
+            key = tuple(current)
+            if self.node_status.get(key) is None:
+                self.node_status[key] = 'pass'
+                if pbar: pbar.update(1)
+
+            for level in self.tree:
+                for child in level:
+                    t_child = tuple(child)
+                    if all(child[i] >= current[i] for i in range(len(child))) and self.node_status.get(t_child) is None:
+                        self.node_status[t_child] = 'pass'
+                        q.append(child)
+                        if pbar: pbar.update(1)
+
+    def _mark_parents_fail(self, node, pbar=None):
+        q = [node]
+        while q:
+            current = q.pop(0)
+            key = tuple(current)
+            if self.node_status.get(key) is None:
+                self.node_status[key] = 'fail'
+                if pbar: pbar.update(1)
+
+            for level in reversed(self.tree):
+                for parent in level:
+                    parent_key = tuple(parent)
+                    if all(parent[i] <= current[i] for i in range(len(current))) and self.node_status.get(parent_key) is None:
+                        self.node_status[parent_key] = 'fail'
+                        q.append(parent)
+                        if pbar: pbar.update(1)
     # ------------------------------------------------------------------
     # k / l checks
     # ------------------------------------------------------------------
-    def check_k_anonymity(self, histogram, k: int, l: int):
-        self.suppression_count = int(
-            np.sum(histogram[(histogram > 0) & (histogram < k)])
-        )
+    def check_k_anonymity(self, merged_histogram, k: int, l: int):
+        if self._is_sparse(merged_histogram):
+            self.suppression_count = int(
+                sum(v for v in merged_histogram.values() if 0 < v < k)
+            )
+        else:
+            self.suppression_count = int(
+                np.sum(merged_histogram[(merged_histogram > 0) & (merged_histogram < k)])
+            )
 
         if self.suppression_count > 0:
             return False
+        '''
+        if not self.enable_l_diversity:
+            return True
 
+        for idx in np.ndindex(histogram.shape):
+            if histogram[idx] > 0 and len(self.sensitive_sets[idx]) < l:
+                self.suppression_count += histogram[idx]
+                return False
+        '''
         return True
 
     # ------------------------------------------------------------------
@@ -282,26 +384,38 @@ class OLA_2:
         )
         temp = 0
         stats = defaultdict(int)
-        for count in merged_hist.flatten():
-            if count >= k:
-                stats[int(count)] += 1
-            else:
-                temp += count
-        if temp > 0:
-            stats[int(temp)] += 1
+        if self._is_sparse(merged_hist):
+            for count in merged_hist.values():
+                if count >= k:
+                    stats[int(count)] += 1
+        else:
+            for count in merged_hist.flatten():
+                if count >= k:
+                    stats[int(count)] += 1
+
         return dict(stats)
 
     def get_suppressed_percent(self, node, histogram, k):
         merged_hist = self.merge_equivalence_classes(
             histogram, list(node)
         )
-        suppressed = np.sum((merged_hist > 0) & (merged_hist < k))
+        if self._is_sparse(merged_hist):
+            suppressed = sum(1 for v in merged_hist.values() if 0 < v < k)
+        else:
+            suppressed = np.sum((merged_hist > 0) & (merged_hist < k))
         return (suppressed / self.total_records) * 100
 
     # ------------------------------------------------------------------
     # Histogram merging helpers
     # ------------------------------------------------------------------
-    def merge_equivalence_classes(self, histogram, node):
+    def merge_equivalence_classes(self, histogram, sensitive_sets, node):
+        if self._is_sparse(histogram):
+            merged_hist, merged_sets = self._merge_sparse_equivalence_classes(
+                histogram, sensitive_sets, node
+            )
+            self.sensitive_sets = merged_sets
+            return merged_hist, merged_sets
+
         merged_hist = histogram
 
         for axis, (qi, bw) in enumerate(zip(self.quasi_identifiers, node)):
@@ -325,18 +439,270 @@ class OLA_2:
     # ------------------------------------------------------------------
     # RF selection
     # ------------------------------------------------------------------
-    def find_best_rf(self, histogram, pass_nodes, k):
+    @staticmethod
+    def _get_suppression_count_for_histogram(hist, k: int) -> int:
+        if isinstance(hist, dict):
+            return int(sum(v for v in hist.values() if 0 < v < k))
+        return int(np.sum(hist[(hist > 0) & (hist < k)]))
+
+    def find_best_rf(self, histogram, pass_nodes, k, l, sensitive_sets):
+        scored_nodes = []
+
         for node in pass_nodes:
             merged_hist = self.merge_equivalence_classes(
                 histogram.copy(), list(node)
             )
 
-            dm_star = np.sum(merged_hist[merged_hist >= k] ** 2)
-            temp = np.sum(merged_hist[merged_hist < k])
-            dm_star += temp ** 2
-            if dm_star < self.lowest_dm_star:
-                self.lowest_dm_star = dm_star
-                self.smallest_passing_rf = node
-                self.best_num_eq_classes = int(np.sum(merged_hist >= k))
+            if self._is_sparse(merged_hist):
+                dm_star = sum(v * v for v in merged_hist.values() if v >= k)
+                num_eq = sum(1 for v in merged_hist.values() if v >= k)
+            else:
+                dm_star = np.sum(merged_hist[merged_hist >= k] ** 2)
+                num_eq = int(np.sum(merged_hist >= k))
+
+            suppression_count = self._get_suppression_count_for_histogram(merged_hist, k)
+
+            scored_nodes.append({
+                "node": [int(x) for x in node],
+                "dm_star": float(dm_star),
+                "num_equivalence_classes": int(num_eq),
+                "suppression_count": int(suppression_count),
+            })
+
+        scored_nodes.sort(
+            key=lambda x: (
+                x["dm_star"],
+                x["suppression_count"],
+                -x["num_equivalence_classes"],
+                x["node"],
+            )
+        )
+
+        self.top_rf_nodes = scored_nodes[:5]
+
+        if self.top_rf_nodes:
+            best = self.top_rf_nodes[0]
+            self.lowest_dm_star = best["dm_star"]
+            self.smallest_passing_rf = best["node"]
+            self.best_num_eq_classes = best["num_equivalence_classes"]
+            self.best_suppression_count = best["suppression_count"]
+
+    def get_top_rf_nodes(self, top_n: int = 5):
+        if top_n <= 0:
+            raise ValueError("top_n must be > 0")
+        return self.top_rf_nodes[:top_n]
 
 
+    def generalize_chunk(self, chunk, bin_widths, s_list):
+
+        gen_chunk = chunk.copy(deep=False)
+
+        for idx, (qi, bw) in enumerate(zip(self.quasi_identifiers, bin_widths)):
+            s = int(s_list[idx]) if idx < len(s_list) else 0
+            col = qi.column_name
+
+            # -------------------------
+            # HANDLE CATEGORICAL QIs
+            # -------------------------
+            if qi.is_categorical:
+                level = int(bw)
+                col_key = qi.column_name.strip().lower()
+                if col_key == "blood group":
+                    mapper = self.categorical_generalizer.generalize_blood_group
+                elif col_key == "gender":
+                    mapper = self.categorical_generalizer.generalize_gender
+                elif col_key == "profession":
+                    mapper = self.categorical_generalizer.generalize_profession
+                else:
+                    mapper = lambda x, _: x
+                gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
+                continue
+
+            # -------------------------
+            # HANDLE NUMERICAL QIs
+            # -------------------------
+            original_col = col.removesuffix("_scaled_encoded") \
+                if col.endswith("_scaled_encoded") else \
+                col.removesuffix("_encoded")
+
+            # ------------------------------------
+            # DETERMINE ENCODED SERIES
+            # ------------------------------------
+            if qi.is_encoded:
+                enc_series = gen_chunk[col].astype("int64")
+
+                encoding_file = os.path.join(
+                    get_encoding_dir(),
+                    f"{original_col.replace(' ', '_').lower()}_encoding.json"
+                )
+
+                with open(encoding_file, "r") as f:
+                    raw_map = json.load(f)
+
+                encoding_map = raw_map["encoding_map"]
+                decoding_map = {int(v): int(k) for k, v in encoding_map.items()}
+
+            else:
+                enc_series = gen_chunk[col].astype("int64")
+                decoding_map = None
+
+            # ------------------------------------
+            # BUILD BIN EDGES IN ENCODED SPACE
+            # ------------------------------------
+            min_val = int(enc_series.min())
+            max_val = int(enc_series.max())
+            step = max(1, int(bw))
+
+            encoded_edges = list(range(min_val, max_val + 1, step))
+            encoded_edges.append(encoded_edges[-1] + step)
+            encoded_edges = np.array(encoded_edges, dtype=int)
+
+            # ------------------------------------
+            # DECODE BIN EDGES (STILL SCALED DOMAIN)
+            # ------------------------------------
+            if decoding_map:
+                decoded_edges = np.array(
+                    [decoding_map.get(v, v) for v in encoded_edges],
+                    dtype=float
+                )
+            else:
+                decoded_edges = encoded_edges.astype(float)
+
+            # ------------------------------------
+            # INVERSE SCALING TO ORIGINAL DOMAIN
+            # ------------------------------------
+            if s > 0:
+                decoded_edges = decoded_edges * (10 ** s)
+            elif s < 0:
+                decoded_edges = np.round(decoded_edges * (10 ** s), abs(s))
+            # s == 0 → identity
+
+            # ------------------------------------
+            # BUILD LABELS
+            # ------------------------------------
+            labels = []
+            for i in range(len(decoded_edges) - 1):
+                left = decoded_edges[i]
+                right = decoded_edges[i + 1]
+                labels.append(f"[{left}-{right})")
+
+            # ------------------------------------
+            # APPLY GENERALISATION
+            # ------------------------------------
+            gen_chunk[original_col] = pd.cut(
+                enc_series,
+                bins=encoded_edges,
+                labels=labels,
+                include_lowest=True,
+                right=False
+            )
+
+        return gen_chunk
+
+
+
+    def get_suppressed_percent(self, node, histogram, k):
+        histogram, _ = self.merge_equivalence_classes(histogram, self.sensitive_sets, list(node))
+        if self._is_sparse(histogram):
+            self.suppression_count = sum(1 for v in histogram.values() if 0 < v < k)
+        else:
+            self.suppression_count = np.sum((histogram > 0) & (histogram < k))
+        return (self.suppression_count / self.total_records) * 100
+
+    def _print_failing_equivalence_classes(self, histogram, k, l,node):
+        print("\n========== Failing Equivalence Classes ==========\n")
+
+        # 1. Print histogram bins < k  (k-anonymity failures)
+        new_bin_widths = list(node)
+        if self._is_sparse(histogram):
+            failing_items = [(idx, v) for idx, v in histogram.items() if 0 < v < k]
+            if failing_items:
+                print(" K-ANONYMITY FAILURES (count < k):")
+                for idx, count in failing_items:
+                    desc = self.describe_equivalence_class(tuple(idx), new_bin_widths)
+                    print(f" {desc}  → count = {count}")
+            else:
+                print("✔ No k-anonymity failures.")
+        else:
+            failing_k = np.argwhere((histogram > 0) & (histogram < k))
+            if failing_k.size > 0:
+                print(" K-ANONYMITY FAILURES (count < k):")
+                for idx in failing_k:
+                    count = histogram[tuple(idx)]
+                    desc = self.describe_equivalence_class(tuple(idx), new_bin_widths)
+                    print(f" {desc}  → count = {count}")
+            else:
+                print("✔ No k-anonymity failures.")
+
+        # If l-diversity is disabled, stop here
+        if not self.enable_l_diversity:
+            print("\nL-diversity disabled → skipping sensitive-set failures.\n")
+            return
+
+        # 2. L-diversity failures
+        print("\n L-DIVERSITY FAILURES:")
+        if self._is_sparse(histogram):
+            for idx, count in histogram.items():
+                if count == 0:
+                    continue
+                sens_set = self.sensitive_sets.get(idx, set())
+                if len(sens_set) < l:
+                    print(f"  Index {idx} -> count={count}, sensitive_values={sens_set}")
+        else:
+            for idx in np.ndindex(histogram.shape):
+                count = histogram[idx]
+                if count == 0:
+                    continue
+                sens_set = self.sensitive_sets[idx]
+                if len(sens_set) < l:
+                    print(f"  Index {idx} -> count={count}, sensitive_values={sens_set}")
+
+    def describe_equivalence_class(self, idx_tuple, bin_widths):
+        """
+        Converts a histogram index into human-readable bin intervals per QI.
+        """
+        desc = []
+
+        for i, (qi, bin_w) in enumerate(zip(self.quasi_identifiers, bin_widths)):
+            dom = self.domains[i]
+            idx = idx_tuple[i]
+
+            # ---------- CATEGORICAL ----------
+            if qi.is_categorical:
+                try:
+                    value = dom[idx]
+                    desc.append(f"{qi.column_name} = {value}")
+                except Exception:
+                    desc.append(f"{qi.column_name} = <invalid_index {idx}>")
+
+            # ---------- NUMERIC ----------
+            else:
+                # numeric QI domain is the sorted list of possible values
+                try:
+                    col_min, col_max = min(dom), max(dom)
+                except Exception:
+                    desc.append(f"{qi.column_name} = <domain_error>")
+                    continue
+
+                bw = int(bin_w)
+                start = col_min + idx * bw
+                end = start + bw - 1
+
+                # clamp numeric range
+                if start < col_min: start = col_min
+                if end > col_max: end = col_max
+
+                desc.append(f"{qi.column_name} ∈ [{start}–{end}]")
+
+        return ", ".join(desc)
+    
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _get_max_categorical_level(qi):
+        if qi.column_name == "Blood Group":
+            return 3
+        if qi.column_name.lower() == "gender":
+            return 2
+        return 4

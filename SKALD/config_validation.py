@@ -3,7 +3,7 @@ Configuration schema and validation logic for the SKALD pipeline.
 """
 
 from pydantic import BaseModel, Field, condecimal, field_validator, model_validator, ValidationError
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import os
 import yaml
 import logging
@@ -15,7 +15,9 @@ logger = logging.getLogger("SKALD")
 # -------------------------------
 class NumericalQuasiIdentifier(BaseModel):
     column: str
-    encode: bool
+    scale: Optional[bool] = None
+    s: Optional[int] = 0
+    encode: Optional[bool] = None
     type: str
 
     @field_validator("type")
@@ -25,7 +27,7 @@ class NumericalQuasiIdentifier(BaseModel):
             raise ValueError("type must be 'int' or 'float'")
         logger.debug("Validated numerical QI type: %s", v)
         return v
-
+    '''
     @model_validator(mode="before")
     def check_encode_for_float(cls, values):
         if not isinstance(values, dict):
@@ -37,7 +39,7 @@ class NumericalQuasiIdentifier(BaseModel):
             raise ValueError("Float numerical QIs must have encode=True")
         logger.debug("Validated numerical QI encoding requirement: %s", values)
         return values
-
+    '''
 
 # -------------------------------
 # Categorical QI
@@ -75,7 +77,10 @@ class Config(BaseModel):
     hashing_with_salt: List[str] = Field(default_factory=list)
     hashing_without_salt: List[str] = Field(default_factory=list)
     masking: List[Dict] = Field(default_factory=list)
-    encrypt: List[str] = Field(default_factory=list)
+    charcloak: List[str] = Field(default_factory=list)
+    tokenization: List[Dict] = Field(default_factory=list)
+    fpe: List[Dict] = Field(default_factory=list)
+    encrypt: List[Any] = Field(default_factory=list)
 
     enable_k_anonymity: bool = True
     enable_l_diversity: bool = False

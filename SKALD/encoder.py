@@ -74,14 +74,25 @@ def encode_numerical_columns(
                 raise FileNotFoundError(f"Chunk file not found: {file_path}")
 
             try:
-                df = pd.read_csv(file_path)
+                df = pd.read_csv(file_path, low_memory=False)
             except Exception as e:
                 raise RuntimeError(f"Failed to read chunk '{filename}': {e}")
 
             if col not in df.columns:
                 raise KeyError(f"Column '{col}' not found in chunk '{filename}'")
 
-            vals = df[col].dropna()
+            raw_vals = df[col]
+            vals = pd.to_numeric(raw_vals, errors="coerce")
+            invalid_count = int(vals.isna().sum() - raw_vals.isna().sum())
+            if invalid_count > 0:
+                logger.warning(
+                    "Column '%s' has %d non-numeric value(s) in chunk '%s' that will be ignored for numerical processing.",
+                    col,
+                    invalid_count,
+                    filename,
+                )
+
+            vals = vals.dropna()
             if vals.empty:
                 continue
 

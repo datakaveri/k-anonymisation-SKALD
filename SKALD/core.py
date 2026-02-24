@@ -29,6 +29,7 @@ from SKALD.preprocess import suppress, encrypt_columns, hash_columns, mask_colum
 from SKALD.SKALDError import SKALDError
 from SKALD.logging_config import setup_logging
 from SKALD.combine_chunks import combine_generalized_chunks 
+from SKALD.rust_ola2_bridge import run_rust_ola2, rust_ola2_is_supported, RustOla2Error
 
 
 logger = logging.getLogger("SKALD")
@@ -77,7 +78,7 @@ def _safe_listdir(path: str) -> List[str]:
 
 def _read_csv_safe(path: str) -> pd.DataFrame:
     try:
-        return pd.read_csv(path)
+        return pd.read_csv(path, low_memory=False)
     except FileNotFoundError:
         raise
     except pd.errors.EmptyDataError:
@@ -340,14 +341,46 @@ def run_pipeline(
         print("Time taken to merge histograms: {:.6} seconds".format(time.time() - start_time))
 
         
-        final_rf = ola_2.get_final_binwidths(
-            global_hist,
-            config.k,
-            config.l if config.enable_l_diversity else 1
-        )
+        if rust_ola2_is_supported(quasi_identifiers, config.size or {}):
+            try:
+                rust_result = run_rust_ola2(
+                    global_hist=global_hist,
+                    initial_ri=initial_ri,
+                    quasi_identifiers=quasi_identifiers,
+                    k=config.k,
+                    suppression_limit=config.suppression_limit,
+                    total_records=total_records,
+                )
+                if not rust_result["best_rf"]:
+                    raise RustOla2Error("Rust OLA2 returned no passing RF node")
+
+                final_rf = [int(x) for x in rust_result["best_rf"]]
+                lowest_dm_star = int(rust_result["lowest_dm_star"])
+                num_eq_classes = int(rust_result["num_equivalence_classes"])
+                logger.info("Using Rust OLA2 result for RF selection")
+            except Exception as rust_err:
+                logger.warning(
+                    "Rust OLA2 failed or unavailable; falling back to Python OLA2. reason=%s",
+                    rust_err,
+                )
+                final_rf = ola_2.get_final_binwidths(
+                    global_hist,
+                    config.k,
+                    config.l if config.enable_l_diversity else 1
+                )
+                lowest_dm_star = ola_2.lowest_dm_star
+                num_eq_classes = ola_2.best_num_eq_classes
+        else:
+            logger.info("Rust OLA2 not supported for current QI/factor config; using Python OLA2")
+            final_rf = ola_2.get_final_binwidths(
+                global_hist,
+                config.k,
+                config.l if config.enable_l_diversity else 1
+            )
+            lowest_dm_star = ola_2.lowest_dm_star
+            num_eq_classes = ola_2.best_num_eq_classes
+
         print("Time taken to compute final RF: {:.6} seconds".format(time.time() - start_time))
-        lowest_dm_star = ola_2.lowest_dm_star
-        num_eq_classes = ola_2.best_num_eq_classes
         eq_class_stats = ola_2.get_equivalence_class_stats(global_hist, final_rf, config.k)
         print("Time taken to compute DM*: {:.6} seconds".format(time.time() - start_time))
         time_OLA2 = time.time() - start_time
@@ -373,8 +406,8 @@ def run_pipeline(
                 "initial_ri": [int(x) for x in initial_ri],
                 "max_levels": max_level,
                 "final_rf": [int(x) for x in final_rf],
-                "lowest_dm_star": int(ola_2.lowest_dm_star),
-                "num_equivalence_classes": int(ola_2.best_num_eq_classes),
+                "lowest_dm_star": int(lowest_dm_star),
+                "num_equivalence_classes": int(num_eq_classes),
                 "k": int(config.k),
                 "l": int(config.l if config.enable_l_diversity else 1),
                 "suppression_limit": float(config.suppression_limit),
@@ -550,4 +583,3 @@ if __name__ == "__main__":
 
    #print(json.dumps(make_json_safe(response), indent=2))
     
-

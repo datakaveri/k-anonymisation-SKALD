@@ -79,7 +79,7 @@ def split_csv_by_ram(data_dir="data"):
 
     # --- Estimate rows per chunk ---
     try:
-        sample = pd.read_csv(input_csv, nrows=10000)
+        sample = pd.read_csv(input_csv, nrows=10000, low_memory=False)
 
     except Exception as e:
         raise RuntimeError(f"Failed reading sample of CSV '{input_csv}': {e}")
@@ -108,7 +108,7 @@ def split_csv_by_ram(data_dir="data"):
 
     # --- Stream the CSV with chunking ---
     try:
-        reader = pd.read_csv(input_csv, chunksize=rows_per_chunk)
+        reader = pd.read_csv(input_csv, chunksize=rows_per_chunk, low_memory=False)
     except Exception as e:
         raise RuntimeError(f"Failed creating CSV reader for '{input_csv}': {e}")
 

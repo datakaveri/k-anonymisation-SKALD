@@ -125,11 +125,27 @@ class OLA_2:
             if col not in dataset.columns:
                 raise KeyError(f"Column '{col}' missing while building domains")
 
-            values = dataset[col].dropna().unique().tolist()
-            if not values:
-                raise ValueError(f"No valid values for column '{col}'")
+            if qi.is_categorical:
+                values = dataset[col].dropna().unique().tolist()
+                if not values:
+                    raise ValueError(f"No valid values for column '{col}'")
+                self.domains.append(sorted(values))
+            else:
+                raw = dataset[col]
+                numeric = pd.to_numeric(raw, errors="coerce")
+                invalid_count = int(numeric.isna().sum() - raw.isna().sum())
+                if invalid_count > 0:
+                    logger.warning(
+                        "Column '%s' has %d non-numeric value(s) in domain build; they will be ignored.",
+                        col,
+                        invalid_count,
+                    )
 
-            self.domains.append(sorted(values))
+                values = numeric.dropna().unique().tolist()
+                if not values:
+                    raise ValueError(f"No valid numeric values for column '{col}'")
+
+                self.domains.append(sorted(values))
 
     def process_chunk(self, chunk: pd.DataFrame, bin_widths: List[int]) -> np.ndarray:
         if not isinstance(chunk, pd.DataFrame) or chunk.empty:
@@ -179,7 +195,12 @@ class OLA_2:
                 indices.append(self.domains[i].index(val))
             else:
                 col_min, _, n_bins = num_bin_info[i]
-                idx = int((val - col_min) // max(1, int(bw)))
+                num_val = pd.to_numeric(pd.Series([val]), errors="coerce").iloc[0]
+                if pd.isna(num_val):
+                    raise ValueError(
+                        f"Invalid numeric value for column '{col}' during binning: {val}"
+                    )
+                idx = int((num_val - col_min) // max(1, int(bw)))
                 indices.append(max(0, min(idx, n_bins - 1)))
 
         return tuple(indices)
@@ -317,6 +338,5 @@ class OLA_2:
                 self.lowest_dm_star = dm_star
                 self.smallest_passing_rf = node
                 self.best_num_eq_classes = int(np.sum(merged_hist >= k))
-
 
 

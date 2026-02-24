@@ -14,7 +14,7 @@ pub struct OLA2 {
 }
 
 impl OLA2 {
-    pub fn new() -> Self {
+    pub fn new() -> Self { 
         Self {
             tree: Vec::new(),
             node_status: HashMap::new(),

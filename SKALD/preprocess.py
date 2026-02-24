@@ -7,6 +7,9 @@ import base64
 import secrets
 from typing import List, Dict
 import logging
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
 logger = logging.getLogger("SKALD")
 
 
@@ -84,52 +87,48 @@ def encrypt_columns(
     output_directory: str
 ) -> pd.DataFrame:
 
-    if not isinstance(columns_to_encrypt, list):
-        logger.error("columns_to_encrypt is not a list: %s", type(columns_to_encrypt).__name__)
-        raise TypeError("columns_to_encrypt must be a list")
-
     os.makedirs(output_directory, exist_ok=True)
     key_file = os.path.join(output_directory, "symmetric_keys.json")
 
-    # Load existing keys
     if os.path.exists(key_file):
-        try:
-            with open(key_file, "r") as f:
-                key_map = json.load(f)
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Corrupted key file '{key_file}': {e}")
+        with open(key_file, "r") as f:
+            key_map = json.load(f)
     else:
         key_map = {}
 
     for col in columns_to_encrypt:
         if col not in dataframe.columns:
-            raise KeyError(f"Column '{col}' not found for encryption")
+            raise KeyError(f"Column '{col}' not found")
 
-        # Get or create key
+        # Get or create AES key (256-bit)
         if col in key_map:
-            key = key_map[col].encode()
+            key = base64.b64decode(key_map[col])
         else:
-            key = Fernet.generate_key()
-            key_map[col] = key.decode()
+            key = AESGCM.generate_key(bit_length=256)
+            key_map[col] = base64.b64encode(key).decode()
 
-        fernet = Fernet(key)
+        aesgcm = AESGCM(key)
 
-        try:
-            dataframe[col] = dataframe[col].astype(str).apply(
-                lambda x: fernet.encrypt(x.encode()).decode()
-                if x.lower() != "nan" else x
-            )
-        except Exception as e:
-            raise RuntimeError(f"Encryption failed for column '{col}': {e}")
-        logger.info("Encrypted column: %s", col)
-    # Persist keys atomically
+        def encrypt_value(x):
+            if pd.isna(x):
+                return x
+
+            plaintext = str(x).encode()
+            nonce = os.urandom(12)  # GCM standard nonce size
+
+            ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+
+            # store nonce + ciphertext together
+            token = base64.b64encode(nonce + ciphertext).decode()
+            return token
+
+        dataframe[col] = dataframe[col].apply(encrypt_value)
+
+    # Save keys
     tmp_key_file = key_file + ".tmp"
-    try:
-        with open(tmp_key_file, "w") as f:
-            json.dump(key_map, f, indent=4)
-        os.replace(tmp_key_file, key_file)
-    except Exception as e:
-        raise OSError(f"Failed to write encryption key file: {e}")
+    with open(tmp_key_file, "w") as f:
+        json.dump(key_map, f, indent=4)
+    os.replace(tmp_key_file, key_file)
 
     return dataframe
 

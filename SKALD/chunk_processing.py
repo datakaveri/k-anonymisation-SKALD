@@ -52,7 +52,7 @@ def process_chunks_for_histograms(
             continue
 
         try:
-            chunk = pd.read_csv(file_path)
+            chunk = pd.read_csv(file_path, low_memory=False)
         except Exception:
             continue
 
@@ -90,22 +90,36 @@ def process_chunks_for_histograms(
                     )
 
                 try:
+                    numeric = pd.to_numeric(working_chunk[column], errors="coerce")
+                    invalid_count = int(numeric.isna().sum() - working_chunk[column].isna().sum())
+                    if invalid_count > 0:
+                        logger.warning(
+                            "Column '%s' has %d non-numeric value(s) in chunk '%s' that will be ignored for histogram encoding.",
+                            column,
+                            invalid_count,
+                            filename,
+                        )
+
                     if col_type == "float":
-                        values = (working_chunk[column] * multiplier).round().astype(int)
+                        values = (numeric * multiplier).round()
                         logger.info("Applied float encoding for column '%s' with multiplier %s", column, multiplier)
                     else:
-                        values = working_chunk[column].astype(int)
+                        values = numeric.round()
                         logger.info("Applied integer encoding for column '%s'", column)
+                    values = values.astype("Int64")
                 except Exception as e:
                     raise ValueError(
                         f"Failed converting values for encoding column '{column}': {e}"
                     )
 
                 encoded = values.map(enc_map)
-
-                if encoded.isna().any():
-                    raise ValueError(
-                        f"Found values in '{column}' not present in encoding_map"
+                missing_encoded = int(encoded.isna().sum())
+                if missing_encoded > 0:
+                    logger.warning(
+                        "Column '%s' produced %d unmapped encoded value(s) in chunk '%s'; affected rows will be skipped in histogram processing.",
+                        column,
+                        missing_encoded,
+                        filename,
                     )
 
                 working_chunk[f"{column}_encoded"] = encoded

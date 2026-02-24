@@ -37,7 +37,7 @@ class ChunkGeneralizer:
             original_col = col.removesuffix("_encoded") if qi.is_encoded else col
 
             if qi.is_encoded:
-                enc_series = gen_chunk[col].astype(int)
+                enc_series = pd.to_numeric(gen_chunk[col], errors="coerce")
 
                 encoding_file = os.path.join(
                     get_encoding_dir(),
@@ -51,12 +51,16 @@ class ChunkGeneralizer:
                 multiplier = raw_map.get("multiplier", 1)
                 decoding_map = {int(v): int(k) for k, v in encoding_map.items()}
             else:
-                enc_series = gen_chunk[col].astype(float)
+                enc_series = pd.to_numeric(gen_chunk[col], errors="coerce")
                 decoding_map = None
                 multiplier = 1
 
-            min_val = int(enc_series.min())
-            max_val = int(enc_series.max())
+            valid = enc_series.dropna()
+            if valid.empty:
+                continue
+
+            min_val = int(valid.min())
+            max_val = int(valid.max())
             step = int(max(1, bw))
 
             encoded_edges = list(range(min_val, max_val + 1, step))
@@ -103,7 +107,7 @@ def generalize_single_chunk(
     if not os.path.isfile(chunk_path):
         raise SKALDError("DATA_MISSING", "Chunk file not found", chunk_path)
 
-    chunk = pd.read_csv(chunk_path)
+    chunk = pd.read_csv(chunk_path, low_memory=False)
     if chunk.empty:
         raise SKALDError("DATA_MISSING", "Chunk is empty", chunk_file)
 
@@ -119,9 +123,11 @@ def generalize_single_chunk(
         multiplier = encoding_maps[column].get("multiplier", 1)
 
         if info.get("type") == "float":
-            encoded = (working_chunk[column] * multiplier).round().astype(int)
+            numeric = pd.to_numeric(working_chunk[column], errors="coerce")
+            encoded = (numeric * multiplier).round().astype("Int64")
         else:
-            encoded = working_chunk[column].astype(int)
+            numeric = pd.to_numeric(working_chunk[column], errors="coerce")
+            encoded = numeric.round().astype("Int64")
 
         working_chunk[f"{column}_encoded"] = encoded.map(enc_map)
 

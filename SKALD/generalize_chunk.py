@@ -62,7 +62,7 @@ def generalize_single_chunk(
         )
 
     working_chunk = chunk.copy()
-    s_list = []
+    s_by_column = {}
 
     # -------------------------
     # Apply numerical scaling and encoding
@@ -85,16 +85,25 @@ def generalize_single_chunk(
                     message=f"Missing encoded column '{encoded_col}' during generalization",
                     suggested_fix="Ensure encoding is applied before generalization"
                 )
-
-    s_list.append(s)
+        s_by_column[column] = s
 
 
     # -------------------------
     # Generalize using OLA_2
     # -------------------------
     try:
+        # Align scaling factor list with OLA_2 quasi-identifier order.
+        aligned_s_list = []
+        for qi in ola_2.quasi_identifiers:
+            base_col = qi.column_name
+            for suffix in ("_scaled_encoded", "_encoded", "_scaled"):
+                if base_col.endswith(suffix):
+                    base_col = base_col[: -len(suffix)]
+                    break
+            aligned_s_list.append(int(s_by_column.get(base_col, 0)))
+
         generalized_chunk = ola_2.generalize_chunk(
-            working_chunk, final_rf, s_list
+            working_chunk, final_rf, aligned_s_list
         )
     except Exception as e:
         raise SKALDError(
@@ -127,5 +136,4 @@ def generalize_single_chunk(
         )
 
     return output_path
-
 

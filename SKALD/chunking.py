@@ -60,8 +60,11 @@ def split_csv_by_ram(data_dir="data"):
 
     # --- Detect RAM safely ---
     try:
-        total_ram_bytes = psutil.virtual_memory().total
+        mem = psutil.virtual_memory()
+        total_ram_bytes = mem.total
+        available_ram_bytes = mem.available
         logger.info("Detected total RAM: %s bytes", total_ram_bytes)
+        logger.info("Detected available RAM: %s bytes", available_ram_bytes)
     except Exception as e:
         logger.error("Failed to detect system RAM: %s", e)
         raise RuntimeError(f"Unable to detect system RAM: {e}")
@@ -70,7 +73,7 @@ def split_csv_by_ram(data_dir="data"):
 
         raise RuntimeError("System RAM reported as zero or negative. Cannot compute chunk size.")
     
-    chunk_ram_bytes = max(total_ram_bytes // 4, 50 * 1024 * 1024)  
+    chunk_ram_bytes = max(total_ram_bytes // 4, 50 * 1024 * 1024)
     # ensure at least 50MB chunks
 
     chunk_ram_gb = chunk_ram_bytes / (1024 ** 3)

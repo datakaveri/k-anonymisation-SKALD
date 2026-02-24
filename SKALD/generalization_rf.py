@@ -6,7 +6,7 @@ import os
 import numpy as np
 import pandas as pd
 from collections import defaultdict
-from typing import List
+from typing import List, Dict, Tuple, Optional
 from tqdm import tqdm
 import glob
 import logging
@@ -68,6 +68,7 @@ class OLA_2:
         self.best_num_eq_classes = None
         self.best_suppression_count = None
         self.suppression_count = 0
+        self.top_rf_nodes = []
 
         self.categorical_generalizer = CategoricalGeneralizer()
 
@@ -80,6 +81,41 @@ class OLA_2:
             return col_name[:-7]
         else:
             return col_name
+
+    # ------------------------------------------------------------------
+    # Sparse histogram helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _is_sparse(histogram) -> bool:
+        return isinstance(histogram, dict)
+
+    @staticmethod
+    def _merge_sparse_histograms(h1: Dict[Tuple[int, ...], int],
+                                 h2: Dict[Tuple[int, ...], int]) -> Dict[Tuple[int, ...], int]:
+        out = dict(h1)
+        for k, v in h2.items():
+            out[k] = out.get(k, 0) + v
+        return out
+
+    @staticmethod
+    def _merge_sparse_equivalence_classes(
+        histogram: Dict[Tuple[int, ...], int],
+        sensitive_sets: Optional[Dict[Tuple[int, ...], set]],
+        node: List[int],
+    ) -> Tuple[Dict[Tuple[int, ...], int], Optional[Dict[Tuple[int, ...], set]]]:
+        merged_hist: Dict[Tuple[int, ...], int] = {}
+        merged_sets: Optional[Dict[Tuple[int, ...], set]] = {} if sensitive_sets is not None else None
+
+        for idx, count in histogram.items():
+            merged_idx = tuple(
+                max(0, idx[i] // max(1, int(node[i]))) for i in range(len(idx))
+            )
+            merged_hist[merged_idx] = merged_hist.get(merged_idx, 0) + count
+            if merged_sets is not None and sensitive_sets is not None:
+                if idx in sensitive_sets:
+                    merged_sets.setdefault(merged_idx, set()).update(sensitive_sets[idx])
+
+        return merged_hist, merged_sets
     # ------------------------------------------------------------------
     # Tree construction
     # ------------------------------------------------------------------
@@ -140,7 +176,7 @@ class OLA_2:
             self.domains.append(sorted(values))
 
 
-    def process_chunk(self, chunk: pd.DataFrame, bin_widths: List[int]) -> np.ndarray:
+    def process_chunk(self, chunk: pd.DataFrame, bin_widths: List[int]) -> dict:
         if not isinstance(chunk, pd.DataFrame) or chunk.empty:
             raise ValueError("chunk must be a non-empty DataFrame")
 
@@ -164,18 +200,15 @@ class OLA_2:
                 shape.append(n_bins)
                 num_bin_info.append((col_min, col_max, n_bins))
 
-        histogram = np.zeros(shape, dtype=int)
-
-        self.sensitive_sets = np.empty(shape, dtype=object)
-        for idx in np.ndindex(*shape):
-            self.sensitive_sets[idx] = set()
+        histogram: Dict[Tuple[int, ...], int] = {}
+        self.sensitive_sets = {}
 
         for _, row in chunk.iterrows():
             try:
                 idx = self._get_bin_index(row, bin_widths, num_bin_info)
-                histogram[idx] += 1
+                histogram[idx] = histogram.get(idx, 0) + 1
                 if self.enable_l_diversity:
-                    self.sensitive_sets[idx].add(row[self.sensitive_parameter])
+                    self.sensitive_sets.setdefault(idx, set()).add(row[self.sensitive_parameter])
             except Exception:
                 continue
 
@@ -203,9 +236,17 @@ class OLA_2:
     # ------------------------------------------------------------------
     # Histogram merging
     # ------------------------------------------------------------------
-    def merge_histograms(self, histograms: List[np.ndarray]) -> np.ndarray:
+    def merge_histograms(self, histograms):
         if not histograms:
             raise ValueError("No histograms to merge")
+
+        first = histograms[0]
+        if self._is_sparse(first):
+            merged = {}
+            for h in histograms:
+                merged = self._merge_sparse_histograms(merged, h)
+            return merged
+
         return np.sum(np.array(histograms), axis=0)
 
     # ------------------------------------------------------------------
@@ -306,10 +347,14 @@ class OLA_2:
     # k / l checks
     # ------------------------------------------------------------------
     def check_k_anonymity(self, merged_histogram, k: int, l: int):
-
-        self.suppression_count = int(
-            np.sum(merged_histogram[(merged_histogram > 0) & (merged_histogram < k)])
-        )
+        if self._is_sparse(merged_histogram):
+            self.suppression_count = int(
+                sum(v for v in merged_histogram.values() if 0 < v < k)
+            )
+        else:
+            self.suppression_count = int(
+                np.sum(merged_histogram[(merged_histogram > 0) & (merged_histogram < k)])
+            )
 
         if self.suppression_count > 0:
             return False
@@ -336,9 +381,14 @@ class OLA_2:
         )
 
         stats = defaultdict(int)
-        for count in merged_hist.flatten():
-            if count >= k:
-                stats[int(count)] += 1
+        if self._is_sparse(merged_hist):
+            for count in merged_hist.values():
+                if count >= k:
+                    stats[int(count)] += 1
+        else:
+            for count in merged_hist.flatten():
+                if count >= k:
+                    stats[int(count)] += 1
 
         return dict(stats)
 
@@ -346,13 +396,23 @@ class OLA_2:
         merged_hist, _ = self.merge_equivalence_classes(
             histogram, self.sensitive_sets, list(node)
         )
-        suppressed = np.sum((merged_hist > 0) & (merged_hist < k))
+        if self._is_sparse(merged_hist):
+            suppressed = sum(1 for v in merged_hist.values() if 0 < v < k)
+        else:
+            suppressed = np.sum((merged_hist > 0) & (merged_hist < k))
         return (suppressed / self.total_records) * 100
 
     # ------------------------------------------------------------------
     # Histogram merging helpers
     # ------------------------------------------------------------------
     def merge_equivalence_classes(self, histogram, sensitive_sets, node):
+        if self._is_sparse(histogram):
+            merged_hist, merged_sets = self._merge_sparse_equivalence_classes(
+                histogram, sensitive_sets, node
+            )
+            self.sensitive_sets = merged_sets
+            return merged_hist, merged_sets
+
         merged_hist = histogram
         merged_sets = sensitive_sets
 
@@ -393,25 +453,66 @@ class OLA_2:
     # ------------------------------------------------------------------
     # RF selection
     # ------------------------------------------------------------------
+    @staticmethod
+    def _get_suppression_count_for_histogram(hist, k: int) -> int:
+        if isinstance(hist, dict):
+            return int(sum(v for v in hist.values() if 0 < v < k))
+        return int(np.sum(hist[(hist > 0) & (hist < k)]))
+
     def find_best_rf(self, histogram, pass_nodes, k, l, sensitive_sets):
+        scored_nodes = []
+
         for node in pass_nodes:
             merged_hist, _ = self.merge_equivalence_classes(
                 histogram.copy(), sensitive_sets.copy(), node
             )
 
-            dm_star = np.sum(merged_hist[merged_hist >= k] ** 2)
+            if self._is_sparse(merged_hist):
+                dm_star = sum(v * v for v in merged_hist.values() if v >= k)
+                num_eq = sum(1 for v in merged_hist.values() if v >= k)
+            else:
+                dm_star = np.sum(merged_hist[merged_hist >= k] ** 2)
+                num_eq = int(np.sum(merged_hist >= k))
 
-            if dm_star < self.lowest_dm_star:
-                self.lowest_dm_star = dm_star
-                self.smallest_passing_rf = node
-                self.best_num_eq_classes = int(np.sum(merged_hist >= k))
+            suppression_count = self._get_suppression_count_for_histogram(merged_hist, k)
+
+            scored_nodes.append({
+                "node": [int(x) for x in node],
+                "dm_star": float(dm_star),
+                "num_equivalence_classes": int(num_eq),
+                "suppression_count": int(suppression_count),
+            })
+
+        scored_nodes.sort(
+            key=lambda x: (
+                x["dm_star"],
+                x["suppression_count"],
+                -x["num_equivalence_classes"],
+                x["node"],
+            )
+        )
+
+        self.top_rf_nodes = scored_nodes[:5]
+
+        if self.top_rf_nodes:
+            best = self.top_rf_nodes[0]
+            self.lowest_dm_star = best["dm_star"]
+            self.smallest_passing_rf = best["node"]
+            self.best_num_eq_classes = best["num_equivalence_classes"]
+            self.best_suppression_count = best["suppression_count"]
+
+    def get_top_rf_nodes(self, top_n: int = 5):
+        if top_n <= 0:
+            raise ValueError("top_n must be > 0")
+        return self.top_rf_nodes[:top_n]
 
 
     def generalize_chunk(self, chunk, bin_widths, s_list):
 
         gen_chunk = chunk.copy(deep=False)
 
-        for qi, bw, s in zip(self.quasi_identifiers, bin_widths, s_list):
+        for idx, (qi, bw) in enumerate(zip(self.quasi_identifiers, bin_widths)):
+            s = int(s_list[idx]) if idx < len(s_list) else 0
             col = qi.column_name
 
             # -------------------------
@@ -419,14 +520,15 @@ class OLA_2:
             # -------------------------
             if qi.is_categorical:
                 level = int(bw)
-                mapping = {
-                    "Blood Group": self.categorical_generalizer.generalize_blood_group,
-                    "Gender": self.categorical_generalizer.generalize_gender
-                }
-                mapper = mapping.get(
-                    qi.column_name,
-                    self.categorical_generalizer.generalize_profession
-                )
+                col_key = qi.column_name.strip().lower()
+                if col_key == "blood group":
+                    mapper = self.categorical_generalizer.generalize_blood_group
+                elif col_key == "gender":
+                    mapper = self.categorical_generalizer.generalize_gender
+                elif col_key == "profession":
+                    mapper = self.categorical_generalizer.generalize_profession
+                else:
+                    mapper = lambda x, _: x
                 gen_chunk[col] = gen_chunk[col].map(lambda x: mapper(x, level))
                 continue
 
@@ -514,24 +616,37 @@ class OLA_2:
 
 
     def get_suppressed_percent(self, node, histogram, k):
-        histogram,_ = self.merge_equivalence_classes(histogram, self.sensitive_sets,list(node))
-        self.suppression_count = np.sum((histogram > 0) & (histogram < k))
+        histogram, _ = self.merge_equivalence_classes(histogram, self.sensitive_sets, list(node))
+        if self._is_sparse(histogram):
+            self.suppression_count = sum(1 for v in histogram.values() if 0 < v < k)
+        else:
+            self.suppression_count = np.sum((histogram > 0) & (histogram < k))
         return (self.suppression_count / self.total_records) * 100
 
     def _print_failing_equivalence_classes(self, histogram, k, l,node):
         print("\n========== Failing Equivalence Classes ==========\n")
 
         # 1. Print histogram bins < k  (k-anonymity failures)
-        failing_k = np.argwhere((histogram > 0) & (histogram < k))
         new_bin_widths = list(node)
-        if failing_k.size > 0:
-            print(" K-ANONYMITY FAILURES (count < k):")
-            for idx in failing_k:
-                count = histogram[tuple(idx)]
-                desc = self.describe_equivalence_class(tuple(idx), new_bin_widths)
-                print(f" {desc}  → count = {count}")
+        if self._is_sparse(histogram):
+            failing_items = [(idx, v) for idx, v in histogram.items() if 0 < v < k]
+            if failing_items:
+                print(" K-ANONYMITY FAILURES (count < k):")
+                for idx, count in failing_items:
+                    desc = self.describe_equivalence_class(tuple(idx), new_bin_widths)
+                    print(f" {desc}  → count = {count}")
+            else:
+                print("✔ No k-anonymity failures.")
         else:
-            print("✔ No k-anonymity failures.")
+            failing_k = np.argwhere((histogram > 0) & (histogram < k))
+            if failing_k.size > 0:
+                print(" K-ANONYMITY FAILURES (count < k):")
+                for idx in failing_k:
+                    count = histogram[tuple(idx)]
+                    desc = self.describe_equivalence_class(tuple(idx), new_bin_widths)
+                    print(f" {desc}  → count = {count}")
+            else:
+                print("✔ No k-anonymity failures.")
 
         # If l-diversity is disabled, stop here
         if not self.enable_l_diversity:
@@ -540,13 +655,21 @@ class OLA_2:
 
         # 2. L-diversity failures
         print("\n L-DIVERSITY FAILURES:")
-        for idx in np.ndindex(histogram.shape):
-            count = histogram[idx]
-            if count == 0:
-                continue
-            sens_set = self.sensitive_sets[idx]
-            if len(sens_set) < l:
-                print(f"  Index {idx} -> count={count}, sensitive_values={sens_set}")
+        if self._is_sparse(histogram):
+            for idx, count in histogram.items():
+                if count == 0:
+                    continue
+                sens_set = self.sensitive_sets.get(idx, set())
+                if len(sens_set) < l:
+                    print(f"  Index {idx} -> count={count}, sensitive_values={sens_set}")
+        else:
+            for idx in np.ndindex(histogram.shape):
+                count = histogram[idx]
+                if count == 0:
+                    continue
+                sens_set = self.sensitive_sets[idx]
+                if len(sens_set) < l:
+                    print(f"  Index {idx} -> count={count}, sensitive_values={sens_set}")
 
     def describe_equivalence_class(self, idx_tuple, bin_widths):
         """

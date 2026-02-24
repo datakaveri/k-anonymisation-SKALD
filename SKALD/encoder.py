@@ -82,22 +82,36 @@ def encode_numerical_columns(
             if col not in df.columns:
                 raise KeyError(f"Column '{col}' not found in chunk '{filename}'")
 
-            vals = df[col].dropna()
+            raw_vals = df[col]
+            if raw_vals.dtype == object:
+                raw_vals = raw_vals.replace(r"^\s*$", np.nan, regex=True)
+
+            numeric_vals = pd.to_numeric(raw_vals, errors="coerce")
+            non_numeric = raw_vals.notna().sum() - numeric_vals.notna().sum()
+            if non_numeric > 0:
+                logger.warning(
+                    "Column '%s' has %d non-numeric value(s) in chunk '%s' that will be ignored for min/max.",
+                    col,
+                    non_numeric,
+                    filename,
+                )
+
             if info.get("scale", False):
                 s = int(info.get("s", 0))
-                vals = np.floor(vals / (10 ** s))
+                numeric_vals = np.floor(numeric_vals / (10 ** s))
 
-            if vals.empty:
+            numeric_vals = numeric_vals.dropna()
+            if numeric_vals.empty:
                 continue
 
             # Update min/max
-            col_min = vals.min() if col_min is None else min(col_min, vals.min())
-            col_max = vals.max() if col_max is None else max(col_max, vals.max())
+            col_min = numeric_vals.min() if col_min is None else min(col_min, numeric_vals.min())
+            col_max = numeric_vals.max() if col_max is None else max(col_max, numeric_vals.max())
 
             # Collect values for encoding
-            vals = vals.astype("int64")
-
-            all_vals.extend(vals.tolist())
+            if encode:
+                vals_int = numeric_vals.astype("int64")
+                all_vals.extend(vals_int.tolist())
 
         # --------------------------------------------------
         # Validate min/max

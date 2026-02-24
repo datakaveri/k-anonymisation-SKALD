@@ -23,7 +23,15 @@ from SKALD.chunk_processing import process_chunks_for_histograms
 from SKALD.generalize_chunk import generalize_single_chunk
 from SKALD.build_QI import build_quasi_identifiers
 from SKALD.chunking import split_csv_by_ram
-from SKALD.preprocess import suppress, encrypt_columns, hash_columns, mask_columns
+from SKALD.preprocess import (
+    suppress,
+    encrypt_columns,
+    hash_columns,
+    mask_columns,
+    charcloak_columns,
+    fpe_encrypt_columns,
+    tokenize_columns,
+)
 from SKALD.SKALDError import SKALDError
 from SKALD.logging_config import setup_logging
 from SKALD.combine_chunks import combine_generalized_chunks 
@@ -200,6 +208,12 @@ def run_pipeline(
                 df = hash_columns(df, config.hashing_with_salt, config.hashing_without_salt)
             if config.masking:
                 df = mask_columns(df, config.masking)
+            if config.charcloak:
+                df = charcloak_columns(df, config.charcloak)
+            if config.tokenization:
+                df = tokenize_columns(df, config.tokenization, config.output_directory)
+            if config.fpe:
+                df = fpe_encrypt_columns(df, config.fpe, config.output_directory)
             if config.encrypt:
                 df = encrypt_columns(df, config.encrypt, config.output_directory)
 
@@ -285,8 +299,7 @@ def run_pipeline(
     try:
         n = len(chunk_files)
         available_ram = psutil.virtual_memory().available
-        max_eq = max(1, available_ram // 10_000)
-
+        max_eq = max(1, available_ram // 32)
         ola_1 = OLA_1(
             quasi_identifiers,
             n,
@@ -322,7 +335,7 @@ def run_pipeline(
 
         ola_2.build_tree(initial_ri)
 
-        histograms = process_chunks_for_histograms(
+        global_hist = process_chunks_for_histograms(
             chunk_files,
             chunk_dir,
             numerical_columns_info,
@@ -330,8 +343,6 @@ def run_pipeline(
             ola_2,
             initial_ri
         )
-
-        global_hist = ola_2.merge_histograms(histograms)
         final_rf = ola_2.get_final_binwidths(
             global_hist,
             config.k,
@@ -341,8 +352,10 @@ def run_pipeline(
         lowest_dm_star = ola_2.lowest_dm_star
         num_eq_classes = ola_2.best_num_eq_classes
         eq_class_stats = ola_2.get_equivalence_class_stats(global_hist, final_rf, config.k)
+        top_ola2_nodes = ola_2.get_top_rf_nodes(5)
 
     except Exception as e:
+        logger.exception("OLA_2 failed with exception: %s", e)
         raise SKALDError(
             code="GENERALIZATION_FAILED",
             message="OLA_2 failed",
@@ -369,6 +382,16 @@ def run_pipeline(
             )
 
         combine_generalized_chunks(config.output_directory, config.output_path)
+
+        # Write equivalence class stats separately
+        _ensure_dir(config.output_directory)
+        stats_path = os.path.join(config.output_directory, "equivalence_class_stats.json")
+        with open(stats_path, "w") as f:
+            json.dump(make_json_safe(eq_class_stats), f, indent=2)
+
+        top_nodes_path = os.path.join(config.output_directory, "top_ola2_nodes.json")
+        with open(top_nodes_path, "w") as f:
+            json.dump(make_json_safe(top_ola2_nodes), f, indent=2)
     except Exception as e:
         raise SKALDError(
             code="GENERALIZATION_FAILED",
@@ -390,6 +413,32 @@ def run_pipeline_safe(config_path: str) -> dict:
 
     try:
         rf, elapsed, dm_star, num_eq, eq_stats = run_pipeline(config_path)
+
+        sample_rows = []
+        top_ola2_nodes = []
+        try:
+            cfg = load_config(config_path)
+
+            candidate_paths = []
+            if cfg.output_path:
+                candidate_paths.append(cfg.output_path)
+                if not os.path.isabs(cfg.output_path):
+                    candidate_paths.append(
+                        os.path.join(cfg.output_directory, os.path.basename(cfg.output_path))
+                    )
+
+            for out_csv in candidate_paths:
+                if os.path.isfile(out_csv):
+                    sample_rows = pd.read_csv(out_csv).head(10).to_dict(orient="records")
+                    break
+
+            top_nodes_path = os.path.join(cfg.output_directory, "top_ola2_nodes.json")
+            if os.path.isfile(top_nodes_path):
+                with open(top_nodes_path, "r") as f:
+                    top_ola2_nodes = json.load(f)
+        except Exception as e:
+            logger.warning("Failed to load sample output/top nodes into status response: %s", e)
+
         return make_json_safe({
             "status": "success",
             "outputs": {
@@ -397,7 +446,9 @@ def run_pipeline_safe(config_path: str) -> dict:
                 "elapsed_time_seconds": elapsed,
                 "lowest_dm_star": dm_star,
                 "num_equivalence_classes": num_eq,
-                "equivalence_class_stats": eq_stats
+                "equivalence_class_stats": eq_stats,
+                "top_ola2_nodes": top_ola2_nodes,
+                "sample_generalized_rows": sample_rows
             },
             "log_file": "log.txt"
         })
@@ -469,6 +520,9 @@ def _entry_main() -> str:
         "hashing_with_salt": conf.get("hashing_with_salt", []),
         "hashing_without_salt": conf.get("hashing_without_salt", []),
         "masking": conf.get("masking", []),
+        "charcloak": conf.get("charcloak", []),
+        "tokenization": conf.get("tokenization", []),
+        "fpe": conf.get("fpe", []),
         "encrypt": conf.get("encrypt", []),
         "quasi_identifiers": conf.get("quasi_identifiers", {}),
         "k": conf.get("k_anonymize", {}).get("k", 1),
@@ -512,6 +566,5 @@ if __name__ == "__main__":
     with open(status_path, "w") as f:
         json.dump(make_json_safe(response), f, indent=2)
 
-    print(json.dumps(make_json_safe(response), indent=2))
+    #print(json.dumps(make_json_safe(response), indent=2))
     
-

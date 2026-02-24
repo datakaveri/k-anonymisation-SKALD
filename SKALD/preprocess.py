@@ -11,6 +11,8 @@ import re
 import string
 from typing import List, Dict, Tuple, Any
 import logging
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import base64
 logger = logging.getLogger("SKALD")
 
 
@@ -166,20 +168,29 @@ def encrypt_columns(
             )
             logger.info("Applied format-preserving encryption to column: %s", col)
         else:
-            # Get or create Fernet key
+            # Get or create AES key (256-bit)
             if col in key_map:
-                key = key_map[col].encode()
+                key = base64.b64decode(key_map[col])
             else:
-                key = Fernet.generate_key()
-                key_map[col] = key.decode()
+                key = AESGCM.generate_key(bit_length=256)
+                key_map[col] = base64.b64encode(key).decode()
 
-            fernet = Fernet(key)
+            aesgcm = AESGCM(key)
+
+            def _aes_encrypt_value(x):
+                if _is_nan_like(x):
+                    return x
+
+                plaintext = str(x).encode()
+                nonce = os.urandom(12)  # required for GCM
+
+                ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+
+                # Store nonce + ciphertext together
+                return base64.b64encode(nonce + ciphertext).decode()
 
             try:
-                dataframe[col] = dataframe[col].astype(str).apply(
-                    lambda x: fernet.encrypt(x.encode()).decode()
-                    if x.lower() != "nan" else x
-                )
+                dataframe[col] = dataframe[col].apply(_aes_encrypt_value)
             except Exception as e:
                 raise RuntimeError(f"Encryption failed for column '{col}': {e}")
             logger.info("Encrypted column: %s", col)

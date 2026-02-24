@@ -1,116 +1,150 @@
 # SKALD
 
-**SKALD** is a scalable, chunk-wise **K-anonymization** tool based on the **Optimal Lattice Anonymization (OLA)** algorithm. It is designed to handle large datasets by processing them in manageable chunks, ensuring data privacy while maintaining utility.
+SKALD is a scalable, chunk-wise k‑anonymization pipeline based on the OLA (Optimal Lattice Anonymization) approach. It is designed for large CSVs, with streaming preprocessing and sparse histograms to keep memory stable on smaller machines.
 
----
+## Highlights
 
-## Features
+- Chunk-based processing for large CSVs
+- Numeric + categorical quasi-identifiers (QI)
+- Streaming preprocessing (suppress, hash, mask, encrypt, charcloak, tokenize, FPE)
+- Numerical encoding for sparse attributes
+- Sparse histogram storage (only non‑zero equivalence classes)
+- OLA‑1 for initial bin widths; OLA‑2 for final RF selection
+- Detailed logging and machine‑readable status output
 
-- Chunk-wise `k`-anonymization using the Optimal Lattice Anonymization (OLA) method  
-- Supports numerical and categorical quasi-identifiers  
-- Efficient encoding for sparse numerical attributes  
-- Decoding of generalized encoded values for interpretability  
-- Global histogram merging for optimal bin width selection  
-- Suppression mechanism to meet `k`-anonymity without excessive data distortion  
-- Clean architecture separating core logic, generalization, and utilities  
-- Fully configurable via a YAML file  
-- Logging support and reproducible output structure  
+## What SKALD Does (Brief)
 
----
+At a high level, SKALD takes a CSV, applies configurable privacy transformations (suppression, hashing, masking, encryption), then computes k‑anonymity generalization using OLA. It operates on chunks so large files can be processed without loading the full dataset into memory.
 
-## Installation
+## Requirements
 
-```bash
-git clone https://github.com/datakaveri/k-anonymisation-SKALD.git
-cd k-anonymisation-SKALD
-pip install -r requirements.txt
-pip install -e .
-```
+- Python 3.8+
+- Dependencies in `requirements.txt`
 
-**Requirements:** Python 3.8+ and the dependencies listed in `requirements.txt`.
+## Quick Start
 
----
-
-## Usage
-
-Run SKALD from the command line:
+1. Put **one CSV** in `k-anonymisation-SKALD/data/`.
+2. Put **one JSON config** in `k-anonymisation-SKALD/config/`.
+3. Run:
 
 ```bash
-SKALD --config config.yaml [--k 10] [--chunks 5] [--chunk_dir chunks]
+python3 -m SKALD.core
 ```
 
-### CLI Arguments
+The pipeline reads the first JSON file in `config/`, builds a temporary YAML config internally, and runs the full pipeline.
 
-| Argument      | Description                                 |
-| ------------- | ------------------------------------------- |
-| `--k`         | Desired k-anonymity level (e.g., 500)       |
-| `--chunks`    | Number of chunks to process (e.g., 100)     |
-| `--chunk_dir` | Directory containing the dataset chunks     |
-| `--config`    | Path to custom YAML config file             |
+## Configuration (JSON)
 
----
+The entrypoint expects a JSON file with this structure:
 
-## Configuration File (`config.yaml`)
+- `operations`: list of operations (e.g., `"SKALD"`, `"k-anonymity"`).
+- `data_type`: name of the dataset block to use.
+- `<data_type>`: the dataset‑specific settings.
 
-```yaml
-number_of_chunks: 1
-k: 10
-max_number_of_eq_classes: 15000000
-suppression_limit: 0.001
+**Example**
 
-chunk_directory: datachunks
-output_path: generalized_chunk1.csv
-log_file: log.txt
-save_output: true
+```json
+{
+  "operations": ["SKALD", "k-anonymity"],
+  "data_type": "BeneficiaryData",
+  "BeneficiaryData": {
+    "enable_k_anonymity": true,
+    "enable_l_diversity": false,
+    "output_path": "generalized.csv",
+    "output_directory": "output",
+    "log_file": "log.txt",
 
-quasi_identifiers:
-  numerical:
-    - column: Age
-      encode: true
-      type: int
-    - column: BMI
-      encode: true
-      type: float
-    - column: PIN Code
-      encode: true
-      type: int
-  categorical: 
-    - column: Blood Group
-    - column: Profession
+    "suppress": ["FULLNAMEENGLISH"],
+    "hashing_with_salt": [],
+    "hashing_without_salt": [],
+    "masking": [],
+    "encrypt": [],
 
-bin_width_multiplication_factor:
-  Age: 2
-  BMI: 2
-  PIN Code: 2
+    "quasi_identifiers": {
+      "categorical": [],
+      "numerical": [
+        {"column": "AGE", "encode": false, "type": "int"},
+        {"column": "DISTRICTCODE", "encode": false, "type": "int"}
+      ]
+    },
 
-hardcoded_min_max:
-  Age: [19, 85]
-  BMI: [12.7, 35.8]
-  PIN Code: [560001, 591346]
+    "k_anonymize": {"k": 2},
+    "l_diversity": {"l": 1},
+    "sensitive_parameter": null,
+    "size": {"AGE": 2, "DISTRICTCODE": 2},
+    "suppression_limit": 0.01
+  }
+}
 ```
 
----
+**Notes**
 
-## Example Workflow
+- `size` contains multiplication factors (>1) used by OLA‑1/OLA‑2.
+- `suppression_limit` is a fraction from 0 to 1.
+- `enable_l_diversity` and `sensitive_parameter` are supported in config; k‑anonymity is enforced, l‑diversity hooks exist but are not strictly enforced in the current check path.
 
-1. Prepare your chunked dataset (e.g., `datachunks/KanonMedicalData_chunk1.csv`, ..., `chunk100.csv`)
-2. Define your quasi-identifiers in `config.yaml`
-3. Run SKALD:
+## Outputs
+
+All outputs go to `output/` by default:
+
+- `output/status.json`: status + error details
+- `output/log.txt`: detailed logs and timings
+- `output/equivalence_class_stats.json`: equivalence class stats
+- `output/<output_path>`: final generalized CSV
+- `encodings/`: numerical encoding maps
+
+## How the Pipeline Works
+
+1. **Config load** from `config/*.json` → temporary YAML
+2. **Data validation** (`data/` must contain a single CSV)
+3. **Chunking** (approx. 1/4 of RAM per chunk)
+4. **Preprocessing** (suppress/hash/mask/encrypt/etc.)
+5. **Numerical encoding** for selected QIs
+6. **OLA‑1** to compute `initial_ri`
+7. **Histogram build** (streaming, sparse)
+8. **OLA‑2** to choose final RF
+9. **Generalization** and output merge
+
+## Preprocessing Steps (Detailed)
+
+Preprocessing happens per chunk before k‑anonymization. The steps are optional and driven by config:
+
+1. **Suppress**  
+   Drops specified columns entirely.
+
+2. **Hashing**  
+   - With salt: irreversible hashing with a per‑run salt.  
+   - Without salt: deterministic hashing (same input → same output).
+
+3. **Masking**  
+   Redacts patterns in string columns (e.g., phone/email), leaving only partial information.
+
+4. **Encryption**  
+   Symmetric encryption for sensitive fields, with keys written to `output/` (e.g., `symmetric_keys.json`).
+
+5. **Charcloak / Tokenization / FPE**  
+   Specialized transforms for preserving formats or generating tokens while hiding original values.
+
+Each transformation is applied in the order above. All transformations run chunk‑wise to keep memory bounded.
+
+## Performance and Memory
+
+- Histogram construction streams each chunk in batches and stores **only non‑zero bins**.
+- You can lower per‑batch memory by setting:
 
 ```bash
-SKALD --config config.yaml
+SKALD_CHUNK_PROCESSING_ROWS=50000 python3 -m SKALD.core
 ```
 
-### Output
+Lower values reduce memory at the cost of runtime.
 
-- `generalized_chunk.csv`: Anonymized first chunk  
-- `encodings/`: JSON encoding maps  
-- `log.txt`: Logging output, bin width info  
-- Console: Runtime and generalization details  
+## Troubleshooting
 
----
+- **Process killed without error**: likely OS OOM kill. Reduce `SKALD_CHUNK_PROCESSING_ROWS` and/or use a smaller input CSV.
+- **Config validation errors**: check key names and required fields. The pipeline validates against `SKALD/config_validation.py`.
+- **Mixed dtype warnings**: ensure numeric QIs are clean. The pipeline coerces numeric values but will log non‑numeric rows.
 
-## Project Structure
+## Project Layout
 
 ```
 k-anonymisation-SKALD/
@@ -118,36 +152,20 @@ k-anonymisation-SKALD/
 │   ├── core.py
 │   ├── generalization_ri.py
 │   ├── generalization_rf.py
-│   ├── quasi_identifier.py
-│   ├── utils.py
-│   ├── cli.py
+│   ├── chunking.py
+│   ├── chunk_processing.py
+│   ├── preprocess.py
 │   └── ...
+├── config/
+├── data/
+├── output/
 ├── encodings/
-├── datachunks/
-├── generalized_chunk.csv
-├── config.yaml
-├── README.md
-└── requirements.txt
+└── README.md
 ```
 
----
+## Development Notes
 
-## How It Works
-
-1. **Chunk Encoding**: Encodes high-cardinality numerical QIs and stores mappings as JSON.  
-2. **OLA Phase 1**: Constructs a lattice of bin widths to meet equivalence class constraints.  
-3. **OLA Phase 2**: Merges histograms from all chunks to refine bin widths.  
-4. **Generalization**: Applies the finalized bin widths to the target chunk for anonymization.  
+- The default entrypoint is `python3 -m SKALD.core`.
+- `SKALD_main.py` provides an integration‑style entrypoint for external pipelines.
 
 ---
-
-## Authors
-
-- **Kailash R** — Core Developer
-
----
-
-## Acknowledgements
-
-- Based on the Optimal Lattice Anonymization (OLA) algorithm.  
-- Utilizes open-source libraries such as `pandas`, `numpy`, and `PyYAML`.

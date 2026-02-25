@@ -44,8 +44,8 @@ class OLA_2:
         if total_records <= 0:
             raise ValueError("total_records must be > 0")
 
-        if not (0 <= suppression_limit <= 100):
-            raise ValueError("suppression_limit must be in [0,100]")
+        if not (0 <= suppression_limit <= 1):
+            raise ValueError("suppression_limit must be in [0,1]")
 
         if enable_l_diversity and not sensitive_parameter:
             raise ValueError("sensitive_parameter required for l-diversity")
@@ -69,6 +69,7 @@ class OLA_2:
         self.best_suppression_count = None
         self.suppression_count = 0
         self.top_rf_nodes = []
+        self.current_k = None
 
         self.categorical_generalizer = CategoricalGeneralizer()
 
@@ -172,7 +173,6 @@ class OLA_2:
 
             if not values:
                 raise ValueError(f"No valid values for column '{col}'")
-
             self.domains.append(sorted(values))
 
 
@@ -185,7 +185,6 @@ class OLA_2:
 
         shape = []
         num_bin_info = []
-
         for qi, dom, bw in zip(self.quasi_identifiers, self.domains, bin_widths):
             if qi.is_categorical:
                 shape.append(len(dom))
@@ -227,7 +226,12 @@ class OLA_2:
                 indices.append(self.domains[i].index(val))
             else:
                 col_min, _, n_bins = num_bin_info[i]
-                idx = int((val - col_min) // max(1, int(bw)))
+                num_val = pd.to_numeric(pd.Series([val]), errors="coerce").iloc[0]
+                if pd.isna(num_val):
+                    raise ValueError(
+                        f"Invalid numeric value for column '{col}' during binning: {val}"
+                    )
+                idx = int((num_val - col_min) // max(1, int(bw)))
                 indices.append(max(0, min(idx, n_bins - 1)))
 
         return tuple(indices)
@@ -256,10 +260,11 @@ class OLA_2:
     def get_final_binwidths(self, histogram, k: int, l: int):
         if histogram is None:
             raise ValueError("histogram cannot be None")
+        self.current_k = int(k)
 
         pass_nodes = []
         base_hist = histogram.copy()
-        base_sets = self.sensitive_sets.copy()
+        base_sets = self.sensitive_sets.copy() if self.sensitive_sets is not None else None
 
         total_nodes = sum(len(level) for level in self.tree)
         pbar = tqdm(total=total_nodes, desc="Evaluating nodes", unit="node")
@@ -283,10 +288,9 @@ class OLA_2:
                     pbar.update(1)
                     continue
 
-                merged_hist, merged_sets = self.merge_equivalence_classes(
-                    base_hist.copy(), base_sets.copy(), node
+                merged_hist, _ = self.merge_equivalence_classes(
+                    base_hist.copy(), base_sets.copy() if base_sets is not None else None, node
                 )
-
                 passes = self.check_k_anonymity(merged_hist, k, l)
                 if passes or self.suppression_count <= (
                     self.suppression_limit * self.total_records
@@ -297,6 +301,7 @@ class OLA_2:
                     self._mark_subtree_pass(node, pbar)
 
                 else:
+
                     self.node_status[key] = "fail"
                     self._mark_parents_fail(node, pbar)
 
@@ -373,13 +378,12 @@ class OLA_2:
     # Metrics & stats (REQUIRED by core.py)
     # ------------------------------------------------------------------
     def get_equivalence_class_stats(self, histogram, bin_widths, k):
-        if histogram is None or self.sensitive_sets is None:
-            raise RuntimeError("Histogram or sensitive_sets not initialized")
+        if histogram  is None:
+            raise RuntimeError("Histogram  not initialized")
 
         merged_hist, _ = self.merge_equivalence_classes(
             histogram, self.sensitive_sets, bin_widths
         )
-
         stats = defaultdict(int)
         if self._is_sparse(merged_hist):
             for count in merged_hist.values():
@@ -414,41 +418,24 @@ class OLA_2:
             return merged_hist, merged_sets
 
         merged_hist = histogram
-        merged_sets = sensitive_sets
 
-        for axis, (qi, level) in enumerate(zip(self.quasi_identifiers, node)):
-            group = max(1, int(level))
-            merged_hist = self._merge_axis(merged_hist, axis, group)
-            merged_sets = self._merge_sets_axis(merged_sets, axis, group)
-
-        self.sensitive_sets = merged_sets
-        return merged_hist, merged_sets
+        for axis, (qi, bw) in enumerate(zip(self.quasi_identifiers, node)):
+            bw = int(bw)
+            merged_hist = self._merge_axis(merged_hist, axis, bw)
+        return merged_hist
 
     @staticmethod
-    def _merge_axis(arr, axis, group):
-        pad = (-arr.shape[axis]) % group
+    def _merge_axis(arr, axis, bw):
+        remainder = arr.shape[axis] % bw
+        pad = (bw - remainder) % bw
         if pad:
             pad_shape = list(arr.shape)
             pad_shape[axis] = pad
             arr = np.concatenate((arr, np.zeros(pad_shape, dtype=int)), axis=axis)
 
-        new_shape = arr.shape[:axis] + (-1, group) + arr.shape[axis + 1 :]
+        new_shape = arr.shape[:axis] + (-1, bw) + arr.shape[axis + 1 :]
         return np.sum(arr.reshape(new_shape), axis=axis + 1)
 
-    @staticmethod
-    def _merge_sets_axis(arr, axis, group):
-        new_shape = list(arr.shape)
-        new_shape[axis] = math.ceil(arr.shape[axis] / group)
-        out = np.empty(new_shape, dtype=object)
-        for idx in np.ndindex(*new_shape):
-            out[idx] = set()
-
-        for idx in np.ndindex(arr.shape):
-            new_idx = list(idx)
-            new_idx[axis] //= group
-            out[tuple(new_idx)] |= arr[idx]
-
-        return out
 
     # ------------------------------------------------------------------
     # RF selection
@@ -464,7 +451,9 @@ class OLA_2:
 
         for node in pass_nodes:
             merged_hist, _ = self.merge_equivalence_classes(
-                histogram.copy(), sensitive_sets.copy(), node
+                histogram.copy(),
+                sensitive_sets.copy() if sensitive_sets is not None else None,
+                list(node)
             )
 
             if self._is_sparse(merged_hist):
@@ -505,6 +494,48 @@ class OLA_2:
         if top_n <= 0:
             raise ValueError("top_n must be > 0")
         return self.top_rf_nodes[:top_n]
+
+    def mark_suppressed_qi_values(self, generalized_chunk: pd.DataFrame, k: Optional[int] = None) -> pd.DataFrame:
+        """
+        Mark (do not drop) records belonging to equivalence classes with size < k.
+        Only QI columns are replaced with '*'; non-QI columns remain unchanged.
+        """
+        if generalized_chunk is None or generalized_chunk.empty:
+            return generalized_chunk
+
+        if k is None:
+            k = self.current_k
+        if k is None or int(k) <= 1:
+            return generalized_chunk
+        k = int(k)
+
+        qi_cols = []
+        for qi in self.quasi_identifiers:
+            col = qi.column_name
+            if not qi.is_categorical:
+                col = self.get_base_column_name(col)
+            if col in generalized_chunk.columns and col not in qi_cols:
+                qi_cols.append(col)
+
+        if not qi_cols:
+            return generalized_chunk
+
+        out = generalized_chunk.copy()
+        eq_counts = out.groupby(qi_cols, dropna=False).size()
+
+        def _is_suppressed(row):
+            key = tuple(row[c] for c in qi_cols)
+            return int(eq_counts.get(key, 0)) < k
+
+        mask = out.apply(_is_suppressed, axis=1)
+        if mask.any():
+            for col in qi_cols:
+                # pd.cut and similar ops may yield Categorical dtype; add '*' as a valid category first.
+                if pd.api.types.is_categorical_dtype(out[col]):
+                    if "*" not in out[col].cat.categories:
+                        out[col] = out[col].cat.add_categories(["*"])
+                out.loc[mask, col] = "*"
+        return out
 
 
     def generalize_chunk(self, chunk, bin_widths, s_list):

@@ -123,6 +123,22 @@ def generalize_single_chunk(
                 generalized_chunk.drop(columns=[col], inplace=True)
 
     # -------------------------
+    # Mark suppressed records (QI columns only)
+    # -------------------------
+    try:
+        if hasattr(ola_2, "mark_suppressed_qi_values"):
+            generalized_chunk = ola_2.mark_suppressed_qi_values(
+                generalized_chunk,
+                getattr(ola_2, "current_k", None),
+            )
+    except Exception as e:
+        raise SKALDError(
+            code="GENERALIZATION_FAILED",
+            message="Failed while marking suppressed records",
+            details=str(e)
+        )
+
+    # -------------------------
     # Write output
     # -------------------------
     try:
@@ -136,4 +152,3 @@ def generalize_single_chunk(
         )
 
     return output_path
-

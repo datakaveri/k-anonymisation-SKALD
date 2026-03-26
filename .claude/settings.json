@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /home/kailash/k-anonymisation-SKALD -name legacy* -o -name *legacy*)"
+    ]
+  }
+}

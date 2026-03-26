@@ -1,5 +1,8 @@
 use crate::pipeline::bootstrap::{split_csv_line_basic, validation, PipelineError, RuntimeConfig};
+use crate::pipeline::pyffx_compat::fpe_encrypt;
+use hmac::{Hmac, Mac};
 use serde_json::Value;
+use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -12,6 +15,18 @@ fn fnv1a64(input: &str) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+/// Generate a random 32-hex-char (16-byte) key from /dev/urandom.
+/// Falls back to zeroed bytes only if the OS RNG is unavailable — still better
+/// than a deterministic derivation from the column name.
+fn generate_random_key_hex() -> String {
+    use std::io::Read;
+    let mut buf = [0u8; 16];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut buf);
+    }
+    hex::encode(buf)
 }
 
 fn hash_hex(input: &str) -> String {
@@ -51,88 +66,106 @@ fn write_json_pretty(path: &Path, v: &Value) -> Result<(), PipelineError> {
     Ok(())
 }
 
-fn shift_char_in_alphabet(c: char, alphabet: &[char], shift: usize) -> char {
-    if let Some(pos) = alphabet.iter().position(|x| *x == c) {
-        alphabet[(pos + shift) % alphabet.len()]
-    } else {
-        c
-    }
+type HmacSha256 = Hmac<Sha256>;
+
+fn derive_key(master_key: &str, context: &str) -> [u8; 16] {
+    let mut mac = HmacSha256::new_from_slice(master_key.as_bytes()).expect("HMAC init");
+    mac.update(context.as_bytes());
+    let digest = mac.finalize().into_bytes();
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest[..16]);
+    out
 }
 
-fn format_preserving_encrypt_general(value: &str, key: &str, column: &str) -> String {
-    let seed = fnv1a64(&format!("{column}:{key}"));
-    let su = ((seed % 26) as usize).max(1);
-    let sl = (((seed / 7) % 26) as usize).max(1);
-    let sd = (((seed / 13) % 10) as usize).max(1);
-    let upper: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect();
-    let lower: Vec<char> = "abcdefghijklmnopqrstuvwxyz".chars().collect();
-    let digits: Vec<char> = "0123456789".chars().collect();
-    value
-        .chars()
-        .map(|c| {
-            if c.is_ascii_uppercase() {
-                shift_char_in_alphabet(c, &upper, su)
-            } else if c.is_ascii_lowercase() {
-                shift_char_in_alphabet(c, &lower, sl)
-            } else if c.is_ascii_digit() {
-                shift_char_in_alphabet(c, &digits, sd)
-            } else {
-                c
+fn format_preserving_encrypt_general(value: &str, master_key: &str, column: &str) -> String {
+    let text = value.to_string();
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0usize;
+    let mut out = String::with_capacity(chars.len());
+
+    while i < chars.len() {
+        let ch = chars[i];
+        let (class_name, alphabet) = if ch.is_ascii_uppercase() {
+            ("upper", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        } else if ch.is_ascii_lowercase() {
+            ("lower", "abcdefghijklmnopqrstuvwxyz")
+        } else if ch.is_ascii_digit() {
+            ("digit", "0123456789")
+        } else {
+            out.push(ch);
+            i += 1;
+            continue;
+        };
+
+        let mut j = i + 1;
+        while j < chars.len() {
+            let c = chars[j];
+            let same = (class_name == "upper" && c.is_ascii_uppercase())
+                || (class_name == "lower" && c.is_ascii_lowercase())
+                || (class_name == "digit" && c.is_ascii_digit());
+            if !same {
+                break;
             }
-        })
-        .collect()
+            j += 1;
+        }
+
+        let segment: String = chars[i..j].iter().collect();
+        let ctx = format!("{column}:{class_name}:{}", segment.len());
+        let key = derive_key(master_key, &ctx);
+        let encrypted = fpe_encrypt(&key, &segment, alphabet);
+        out.push_str(&encrypted);
+        i = j;
+    }
+
+    out
 }
 
 fn pseudo_encrypt(value: &str, key: &str, column: &str) -> String {
-    let seed = fnv1a64(&format!("{column}:{key}"));
+    // Build a keystream via successive HMAC-SHA256 blocks so the pattern never repeats,
+    // regardless of value length. Each 16-byte block i uses context "<column>:<i>".
+    let plaintext = value.as_bytes();
+    let mut keystream = Vec::with_capacity(plaintext.len());
+    let mut block_idx: u64 = 0;
+    while keystream.len() < plaintext.len() {
+        let ctx = format!("{column}:{block_idx}");
+        keystream.extend_from_slice(&derive_key(key, &ctx));
+        block_idx += 1;
+    }
     let mut out = String::from("ENC$");
-    for (i, b) in value.as_bytes().iter().enumerate() {
-        let k = ((seed >> ((i % 8) * 8)) & 0xff) as u8;
-        out.push_str(&format!("{:02x}", b ^ k));
+    for (p, k) in plaintext.iter().zip(keystream.iter()) {
+        out.push_str(&format!("{:02x}", p ^ k));
     }
     out
 }
 
-fn pseudo_fpe_pan(value: &str, key: &str, column: &str) -> String {
+fn fpe_pan_encrypt(value: &str, master_key: &str) -> String {
     let chars: Vec<char> = value.chars().collect();
-    if chars.len() != 10 {
-        return value.to_string();
-    }
-    if !chars[..5].iter().all(|c| c.is_ascii_uppercase())
+    if chars.len() != 10
+        || !chars[..5].iter().all(|c| c.is_ascii_uppercase())
         || !chars[5..9].iter().all(|c| c.is_ascii_digit())
         || !chars[9].is_ascii_uppercase()
     {
         return value.to_string();
     }
-    let seed = fnv1a64(&format!("pan:{column}:{key}"));
-    let su1 = ((seed % 26) as usize).max(1);
-    let sd = (((seed / 11) % 10) as usize).max(1);
-    let su2 = (((seed / 17) % 26) as usize).max(1);
-    let upper: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".chars().collect();
-    let digits: Vec<char> = "0123456789".chars().collect();
+    let letters_key = derive_key(master_key, "pan_letters");
+    let digits_key = derive_key(master_key, "pan_digits");
+    let suffix_key = derive_key(master_key, "pan_suffix");
+    let part1: String = chars[..5].iter().collect();
+    let part2: String = chars[5..9].iter().collect();
+    let part3: String = chars[9..10].iter().collect();
 
-    let mut out = String::new();
-    for c in &chars[..5] {
-        out.push(shift_char_in_alphabet(*c, &upper, su1));
-    }
-    for c in &chars[5..9] {
-        out.push(shift_char_in_alphabet(*c, &digits, sd));
-    }
-    out.push(shift_char_in_alphabet(chars[9], &upper, su2));
-    out
+    let e1 = fpe_encrypt(&letters_key, &part1, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    let e2 = fpe_encrypt(&digits_key, &part2, "0123456789");
+    let e3 = fpe_encrypt(&suffix_key, &part3, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    format!("{e1}{e2}{e3}")
 }
 
-fn pseudo_fpe_digits(value: &str, key: &str, column: &str) -> String {
+fn fpe_digits_encrypt(value: &str, master_key: &str) -> String {
     if value.is_empty() || !value.chars().all(|c| c.is_ascii_digit()) {
         return value.to_string();
     }
-    let seed = fnv1a64(&format!("digits:{}:{}:{}", value.len(), column, key));
-    let sd = ((seed % 10) as usize).max(1);
-    let digits: Vec<char> = "0123456789".chars().collect();
-    value
-        .chars()
-        .map(|c| shift_char_in_alphabet(c, &digits, sd))
-        .collect()
+    let key = derive_key(master_key, &format!("digits_len_{}", value.len()));
+    fpe_encrypt(&key, value, "0123456789")
 }
 
 #[derive(Debug)]
@@ -145,16 +178,16 @@ struct TokenizationConfigLite {
 fn parse_tokenization_config(entry: &Value) -> Result<TokenizationConfigLite, PipelineError> {
     let obj = entry
         .as_object()
-        .ok_or_else(|| validation("PREPROCESSING_FAILED", "Each tokenization entry must be an object", "tokenization"))?;
+        .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "Each tokenization entry must be an object", "tokenization"))?;
     let column = obj
         .get("column")
         .and_then(Value::as_str)
-        .ok_or_else(|| validation("PREPROCESSING_FAILED", "Tokenization config missing 'column'", "tokenization"))?
+        .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "Tokenization config missing 'column'", "tokenization"))?
         .to_string();
     let prefix = obj.get("prefix").and_then(Value::as_str).unwrap_or("TK-").to_string();
     let digits = obj.get("digits").and_then(Value::as_i64).unwrap_or(6);
     if digits <= 0 {
-        return Err(validation("PREPROCESSING_FAILED", "tokenization 'digits' must be > 0", &column));
+        return Err(validation("PREPROCESS_CONFIG_INVALID", "tokenization 'digits' must be > 0", &column));
     }
     Ok(TokenizationConfigLite { column, prefix, digits: digits as usize })
 }
@@ -168,15 +201,15 @@ struct FpeConfigLite {
 fn parse_fpe_config(entry: &Value) -> Result<FpeConfigLite, PipelineError> {
     let obj = entry
         .as_object()
-        .ok_or_else(|| validation("PREPROCESSING_FAILED", "Each FPE entry must be an object", "fpe"))?;
+        .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "Each FPE entry must be an object", "fpe"))?;
     let column = obj
         .get("column")
         .and_then(Value::as_str)
-        .ok_or_else(|| validation("PREPROCESSING_FAILED", "FPE config missing 'column'", "fpe"))?
+        .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "FPE config missing 'column'", "fpe"))?
         .to_string();
     let format = obj.get("format").and_then(Value::as_str).unwrap_or("pan").to_string();
     if format != "pan" && format != "digits" {
-        return Err(validation("PREPROCESSING_FAILED", "FPE format must be 'pan' or 'digits'", &column));
+        return Err(validation("PREPROCESS_CONFIG_INVALID", "FPE format must be 'pan' or 'digits'", &column));
     }
     Ok(FpeConfigLite { column, format })
 }
@@ -193,9 +226,9 @@ fn parse_encrypt_config(entry: &Value) -> Result<EncryptConfigLite, PipelineErro
     }
     let obj = entry
         .as_object()
-        .ok_or_else(|| validation("PREPROCESSING_FAILED", "Encrypt entry must be string or object", "encrypt"))?;
+        .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "Encrypt entry must be string or object", "encrypt"))?;
     if obj.len() != 1 {
-        return Err(validation("PREPROCESSING_FAILED", "Encrypt object entry must contain one column key", "encrypt"));
+        return Err(validation("PREPROCESS_CONFIG_INVALID", "Encrypt object entry must contain one column key", "encrypt"));
     }
     let (column, opts) = obj.iter().next().expect("checked len=1");
     let format_preserving = opts
@@ -254,11 +287,11 @@ struct MaskingConfigLite {
 fn parse_masking_config(entry: &Value) -> Result<MaskingConfigLite, PipelineError> {
     let obj = entry
         .as_object()
-        .ok_or_else(|| validation("PREPROCESSING_FAILED", "Each masking entry must be an object", "masking"))?;
+        .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "Each masking entry must be an object", "masking"))?;
     let column = obj
         .get("column")
         .and_then(Value::as_str)
-        .ok_or_else(|| validation("PREPROCESSING_FAILED", "Masking config missing 'column'", "masking"))?
+        .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "Masking config missing 'column'", "masking"))?
         .to_string();
 
     let masking_char_s = obj
@@ -269,13 +302,13 @@ fn parse_masking_config(entry: &Value) -> Result<MaskingConfigLite, PipelineErro
     let masking_char = masking_char_s
         .chars()
         .next()
-        .ok_or_else(|| validation("PREPROCESSING_FAILED", "masking_char cannot be empty", &column))?;
+        .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "masking_char cannot be empty", &column))?;
 
     let mut characters_to_mask = Vec::new();
     if let Some(arr) = obj.get("characters_to_mask").and_then(Value::as_array) {
         for v in arr {
             let pos = v.as_i64().ok_or_else(|| {
-                validation("PREPROCESSING_FAILED", "characters_to_mask must be positive integers", &column)
+                validation("PREPROCESS_CONFIG_INVALID", "characters_to_mask must be positive integers", &column)
             })?;
             if pos > 0 {
                 characters_to_mask.push(pos as usize);
@@ -378,12 +411,39 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
     let out_dir = out_dir_buf.as_path();
     fs::create_dir_all(out_dir)?;
 
+    // --- In-memory token vault (replaces JSON-Value traversal per row) ---
+    // Keyed by column name → (forward: value→token, reverse: token→value, next sequential id)
+    struct InMemVault {
+        forward: BTreeMap<String, String>,
+        reverse: BTreeMap<String, String>,
+        next_id: u64,
+    }
+
     let token_vault_path = out_dir.join("token_vault.json");
-    let mut token_vault: Value = if token_vault_path.exists() {
-        serde_json::from_str(&fs::read_to_string(&token_vault_path)?)?
-    } else {
-        serde_json::json!({})
-    };
+    let mut in_mem_vaults: BTreeMap<String, InMemVault> = BTreeMap::new();
+    if !token_cfgs.is_empty() {
+        let existing: Value = if token_vault_path.exists() {
+            serde_json::from_str(&fs::read_to_string(&token_vault_path)?)?
+        } else {
+            serde_json::json!({})
+        };
+        for tcfg in &token_cfgs {
+            let fwd: BTreeMap<String, String> = existing
+                .get(&tcfg.column)
+                .and_then(|c| c.get("forward"))
+                .and_then(Value::as_object)
+                .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+                .unwrap_or_default();
+            let rev: BTreeMap<String, String> = existing
+                .get(&tcfg.column)
+                .and_then(|c| c.get("reverse"))
+                .and_then(Value::as_object)
+                .map(|m| m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+                .unwrap_or_default();
+            let next_id = rev.len() as u64 + 1;
+            in_mem_vaults.insert(tcfg.column.clone(), InMemVault { forward: fwd, reverse: rev, next_id });
+        }
+    }
 
     let fpe_keys_path = out_dir.join("fpe_keys.json");
     let mut fpe_keys = read_json_map_string(&fpe_keys_path)?;
@@ -400,12 +460,12 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
         let mut lines = reader.lines();
         let header_line = lines
             .next()
-            .ok_or_else(|| validation("PREPROCESSING_FAILED", "Chunk is empty", &chunk_path.display().to_string()))?
-            .map_err(|e| validation("PREPROCESSING_FAILED", "Failed reading header", &e.to_string()))?;
+            .ok_or_else(|| validation("DATA_EMPTY", "Chunk is empty", &chunk_path.display().to_string()))?
+            .map_err(|e| validation("IO_READ_FAILED", "Failed reading header", &e.to_string()))?;
         let mut headers = split_csv_line_basic(&header_line);
         let mut rows: Vec<Vec<String>> = Vec::new();
         for line in lines {
-            let line = line.map_err(|e| validation("PREPROCESSING_FAILED", "Failed reading row", &e.to_string()))?;
+            let line = line.map_err(|e| validation("IO_READ_FAILED", "Failed reading row", &e.to_string()))?;
             if line.trim().is_empty() {
                 continue;
             }
@@ -418,7 +478,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                 if let Some(i) = headers.iter().position(|h| h == col) {
                     drop_idx.push(i);
                 } else {
-                    return Err(validation("PREPROCESSING_FAILED", "Suppression column not found", col));
+                    return Err(validation("PREPROCESS_COLUMN_MISSING", "Suppression column not found in CSV header", col));
                 }
             }
             drop_idx.sort_unstable();
@@ -443,7 +503,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
             let idx = headers
                 .iter()
                 .position(|h| h == col)
-                .ok_or_else(|| validation("PREPROCESSING_FAILED", "Column not found for salted hashing", col))?;
+                .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for salted hashing", col))?;
             let salt = format!("skald_salt_{}", hash_hex(col));
             for row in &mut rows {
                 if idx >= row.len() {
@@ -461,7 +521,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
             let idx = headers
                 .iter()
                 .position(|h| h == col)
-                .ok_or_else(|| validation("PREPROCESSING_FAILED", "Column not found for hashing", col))?;
+                .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for hashing", col))?;
             for row in &mut rows {
                 if idx >= row.len() {
                     continue;
@@ -478,7 +538,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
             let idx = headers
                 .iter()
                 .position(|h| h == &m.column)
-                .ok_or_else(|| validation("PREPROCESSING_FAILED", "Column not found for masking", &m.column))?;
+                .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for masking", &m.column))?;
             for (r_i, row) in rows.iter_mut().enumerate() {
                 if idx >= row.len() {
                     continue;
@@ -496,7 +556,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
             let idx = headers
                 .iter()
                 .position(|h| h == col)
-                .ok_or_else(|| validation("PREPROCESSING_FAILED", "Column not found for charcloak", col))?;
+                .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for charcloak", col))?;
             for (r_i, row) in rows.iter_mut().enumerate() {
                 if idx >= row.len() {
                     continue;
@@ -514,11 +574,10 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
             let idx = headers
                 .iter()
                 .position(|h| h == &tcfg.column)
-                .ok_or_else(|| validation("PREPROCESSING_FAILED", "Column not found for tokenization", &tcfg.column))?;
-
-            if token_vault.get(&tcfg.column).is_none() {
-                token_vault[tcfg.column.clone()] = serde_json::json!({ "forward": {}, "reverse": {} });
-            }
+                .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for tokenization", &tcfg.column))?;
+            let vault = in_mem_vaults
+                .get_mut(&tcfg.column)
+                .ok_or_else(|| validation("INTERNAL_ERROR", "Token vault missing for column", &tcfg.column))?;
 
             for row in &mut rows {
                 if idx >= row.len() {
@@ -528,52 +587,15 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                 if should_skip_value(&v) {
                     continue;
                 }
-                let col_obj = token_vault
-                    .get_mut(&tcfg.column)
-                    .and_then(Value::as_object_mut)
-                    .ok_or_else(|| validation("PREPROCESSING_FAILED", "Invalid token vault shape", &tcfg.column))?;
-
-                let existing_token = col_obj
-                    .get("forward")
-                    .and_then(Value::as_object)
-                    .and_then(|m| m.get(&v))
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_string());
-
-                if let Some(tok) = existing_token {
-                    row[idx] = tok;
+                // O(1) lookup in BTreeMap instead of traversing JSON Value tree
+                if let Some(tok) = vault.forward.get(&v) {
+                    row[idx] = tok.clone();
                 } else {
-                    let reverse_len = col_obj
-                        .get("reverse")
-                        .and_then(Value::as_object)
-                        .map(|m| m.len())
-                        .unwrap_or(0);
-                    let mut n = (reverse_len as u64) + 1;
-                    let token = loop {
-                        let candidate = format!("{}{:0width$}", tcfg.prefix, n, width = tcfg.digits);
-                        let exists = col_obj
-                            .get("reverse")
-                            .and_then(Value::as_object)
-                            .map(|m| m.contains_key(&candidate))
-                            .unwrap_or(false);
-                        if !exists {
-                            break candidate;
-                        }
-                        n += 1;
-                    };
-
-                    let forward = col_obj
-                        .get_mut("forward")
-                        .and_then(Value::as_object_mut)
-                        .ok_or_else(|| validation("PREPROCESSING_FAILED", "Invalid token vault forward map", &tcfg.column))?;
-                    forward.insert(v.clone(), Value::String(token.clone()));
-
-                    let reverse = col_obj
-                        .get_mut("reverse")
-                        .and_then(Value::as_object_mut)
-                        .ok_or_else(|| validation("PREPROCESSING_FAILED", "Invalid token vault reverse map", &tcfg.column))?;
-                    reverse.insert(token.clone(), Value::String(v.clone()));
-
+                    // next_id is a simple counter — no collision loop needed
+                    let token = format!("{}{:0width$}", tcfg.prefix, vault.next_id, width = tcfg.digits);
+                    vault.forward.insert(v.clone(), token.clone());
+                    vault.reverse.insert(token.clone(), v);
+                    vault.next_id += 1;
                     row[idx] = token;
                 }
             }
@@ -583,10 +605,10 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
             let idx = headers
                 .iter()
                 .position(|h| h == &fcfg.column)
-                .ok_or_else(|| validation("PREPROCESSING_FAILED", "Column not found for FPE", &fcfg.column))?;
+                .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for FPE encryption", &fcfg.column))?;
             let key = fpe_keys
                 .entry(fcfg.column.clone())
-                .or_insert_with(|| format!("{:032x}", fnv1a64(&format!("fpekey:{}", fcfg.column))))
+                .or_insert_with(generate_random_key_hex)
                 .clone();
 
             for row in &mut rows {
@@ -598,9 +620,9 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                     continue;
                 }
                 row[idx] = if fcfg.format == "pan" {
-                    pseudo_fpe_pan(&v, &key, &fcfg.column)
+                    fpe_pan_encrypt(&v, &key)
                 } else {
-                    pseudo_fpe_digits(&v, &key, &fcfg.column)
+                    fpe_digits_encrypt(&v, &key)
                 };
             }
         }
@@ -609,12 +631,12 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
             let idx = headers
                 .iter()
                 .position(|h| h == &ecfg.column)
-                .ok_or_else(|| validation("PREPROCESSING_FAILED", "Column not found for encryption", &ecfg.column))?;
+                .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for encryption", &ecfg.column))?;
 
             if ecfg.format_preserving {
                 let key = fpe_encrypt_keys
                     .entry(ecfg.column.clone())
-                    .or_insert_with(|| format!("{:032x}", fnv1a64(&format!("fpeenc:{}", ecfg.column))))
+                    .or_insert_with(generate_random_key_hex)
                     .clone();
                 for row in &mut rows {
                     if idx >= row.len() {
@@ -629,7 +651,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
             } else {
                 let key = symmetric_keys
                     .entry(ecfg.column.clone())
-                    .or_insert_with(|| format!("{:032x}", fnv1a64(&format!("sym:{}", ecfg.column))))
+                    .or_insert_with(generate_random_key_hex)
                     .clone();
                 for row in &mut rows {
                     if idx >= row.len() {
@@ -656,7 +678,17 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
         fs::rename(tmp_path, chunk_path)?;
     }
 
-    write_json_pretty(&token_vault_path, &token_vault)?;
+    // Serialize in-memory vaults back to the JSON format expected by callers
+    if !in_mem_vaults.is_empty() {
+        let mut vault_json = serde_json::json!({});
+        for (col, vault) in &in_mem_vaults {
+            vault_json[col] = serde_json::json!({
+                "forward": vault.forward.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect::<serde_json::Map<_, _>>(),
+                "reverse": vault.reverse.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect::<serde_json::Map<_, _>>(),
+            });
+        }
+        write_json_pretty(&token_vault_path, &vault_json)?;
+    }
     write_json_pretty(
         &fpe_keys_path,
         &Value::Object(fpe_keys.into_iter().map(|(k, v)| (k, Value::String(v))).collect()),

@@ -1,6 +1,6 @@
 use crate::pipeline::bootstrap::{split_csv_line_basic, validation, PipelineError, RuntimeConfig};
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -158,45 +158,50 @@ pub fn compute_numerical_min_max(
     chunk_paths: &[PathBuf],
     numerical_columns: &[String],
 ) -> Result<BTreeMap<String, (f64, f64)>, PipelineError> {
-    let mut dynamic_min_max: BTreeMap<String, (f64, f64)> = BTreeMap::new();
+    // (min, max) accumulators — one entry per column, updated in a single pass per chunk
+    let mut acc: BTreeMap<String, (Option<f64>, Option<f64>)> =
+        numerical_columns.iter().map(|c| (c.clone(), (None, None))).collect();
 
-    for col_name in numerical_columns {
-        let mut min_val: Option<f64> = None;
-        let mut max_val: Option<f64> = None;
+    for chunk_path in chunk_paths {
+        let f = fs::File::open(chunk_path)?;
+        let r = BufReader::new(f);
+        let mut lines = r.lines();
+        let header = lines
+            .next()
+            .ok_or_else(|| validation("ENCODING_FAILED", "Chunk missing header", &chunk_path.display().to_string()))?
+            .map_err(|e| validation("ENCODING_FAILED", "Failed reading header", &e.to_string()))?;
+        let headers = split_csv_line_basic(&header);
 
-        for chunk_path in chunk_paths {
-            let f = fs::File::open(chunk_path)?;
-            let r = BufReader::new(f);
-            let mut lines = r.lines();
-            let header = lines
-                .next()
-                .ok_or_else(|| validation("ENCODING_FAILED", "Chunk missing header", &chunk_path.display().to_string()))?
-                .map_err(|e| validation("ENCODING_FAILED", "Failed reading header", &e.to_string()))?;
-            let headers = split_csv_line_basic(&header);
-            let col_idx = headers
-                .iter()
-                .position(|h| h == col_name)
-                .ok_or_else(|| validation("GENERALIZATION_FAILED", "Numerical column not found", col_name))?;
+        // Resolve column indices once per chunk (same schema across all chunks)
+        let col_indices: Vec<Option<usize>> = numerical_columns
+            .iter()
+            .map(|col| headers.iter().position(|h| h == col))
+            .collect();
 
-            for line in lines {
-                let line = line.map_err(|e| validation("GENERALIZATION_FAILED", "Failed reading row", &e.to_string()))?;
-                let fields = split_csv_line_basic(&line);
-                if col_idx >= fields.len() {
+        for line in lines {
+            let line = line.map_err(|e| validation("GENERALIZATION_FAILED", "Failed reading row", &e.to_string()))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let fields = split_csv_line_basic(&line);
+            for (col_name, col_idx_opt) in numerical_columns.iter().zip(col_indices.iter()) {
+                let Some(col_idx) = col_idx_opt else { continue };
+                if *col_idx >= fields.len() {
                     continue;
                 }
-                if let Ok(v) = fields[col_idx].trim().parse::<f64>() {
-                    min_val = Some(min_val.map_or(v, |m| m.min(v)));
-                    max_val = Some(max_val.map_or(v, |m| m.max(v)));
+                if let Ok(v) = fields[*col_idx].trim().parse::<f64>() {
+                    let entry = acc.get_mut(col_name).unwrap();
+                    entry.0 = Some(entry.0.map_or(v, |m: f64| m.min(v)));
+                    entry.1 = Some(entry.1.map_or(v, |m: f64| m.max(v)));
                 }
             }
         }
-
-        let mn = min_val.unwrap_or(0.0);
-        let mx = max_val.unwrap_or(0.0);
-        dynamic_min_max.insert(col_name.clone(), (mn, mx));
     }
 
-    Ok(dynamic_min_max)
+    Ok(acc
+        .into_iter()
+        .map(|(k, (mn, mx))| (k, (mn.unwrap_or(0.0), mx.unwrap_or(0.0))))
+        .collect())
 }
 
 pub fn build_quasi_identifiers(
@@ -238,7 +243,7 @@ pub fn find_ola1_initial_ri(
     size_factors: &BTreeMap<String, i64>,
 ) -> Result<Vec<i64>, PipelineError> {
     if qis.is_empty() {
-        return Err(validation("GENERALIZATION_FAILED", "No QIs for OLA-1", "qis"));
+        return Err(validation("ANON_NO_QIS", "No quasi-identifiers defined — cannot run OLA-1", "Add at least one QI to quasi_identifiers in config"));
     }
     if max_eq <= 0 {
         return Err(validation("GENERALIZATION_FAILED", "max_eq must be > 0", "OLA-1"));
@@ -253,22 +258,12 @@ pub fn find_ola1_initial_ri(
         }
     }
 
-    while node_status.values().any(Option::is_none) {
-        for level in &tree {
-            for node in level {
-                if node_status.get(node).and_then(|v| *v).is_some()
-                    || node_status.get(node) == Some(&Some(false))
-                {
-                    continue;
-                }
-                let classes = calculate_equivalence_classes_ola1(qis, node)?;
-                if classes <= max_eq {
-                    node_status.insert(node.clone(), Some(true));
-                } else {
-                    // Mirrors Python behavior where only current node is reliably marked fail.
-                    node_status.insert(node.clone(), Some(false));
-                }
-            }
+    // Single pass — each node is independent (calculate_equivalence_classes_ola1 depends only
+    // on the node vector itself, not on any other node's status), so no outer loop is needed.
+    for level in &tree {
+        for node in level {
+            let classes = calculate_equivalence_classes_ola1(qis, node)?;
+            node_status.insert(node.clone(), Some(classes <= max_eq));
         }
     }
 
@@ -279,9 +274,9 @@ pub fn find_ola1_initial_ri(
     passing.sort();
     passing.into_iter().next().ok_or_else(|| {
         validation(
-            "GENERALIZATION_FAILED",
-            "No generalization satisfies equivalence class constraint",
-            "OLA-1",
+            "ANON_INFEASIBLE",
+            "No generalization satisfies the equivalence class memory constraint (OLA-1)",
+            "Increase available RAM, reduce size factors, or reduce the number of QIs",
         )
     })
 }
@@ -295,59 +290,61 @@ pub fn build_sparse_histogram(
         return Err(validation("GENERALIZATION_FAILED", "initial_ri length mismatch", "OLA-2"));
     }
 
-    let mut hist: SparseHist = BTreeMap::new();
-    let mut total_records: i64 = 0;
-    let mut categorical_domains: Vec<Vec<String>> = vec![Vec::new(); qis.len()];
-    let mut domains_built = false;
-
-    for chunk in chunk_paths {
-        let f = fs::File::open(chunk)?;
-        let r = BufReader::new(f);
-        let mut lines = r.lines();
+    // Resolve column indices from the first chunk's header (schema is identical across all chunks)
+    let col_idx: Vec<usize> = {
+        let first = chunk_paths
+            .first()
+            .ok_or_else(|| validation("GENERALIZATION_FAILED", "No chunks provided", "histogram"))?;
+        let f = fs::File::open(first)?;
+        let mut lines = BufReader::new(f).lines();
         let header = lines
             .next()
-            .ok_or_else(|| validation("GENERALIZATION_FAILED", "chunk missing header", &chunk.display().to_string()))?
+            .ok_or_else(|| validation("GENERALIZATION_FAILED", "chunk missing header", &first.display().to_string()))?
             .map_err(|e| validation("GENERALIZATION_FAILED", "failed reading chunk header", &e.to_string()))?;
         let headers = split_csv_line_basic(&header);
-
-        let mut col_idx = Vec::with_capacity(qis.len());
+        let mut out = Vec::with_capacity(qis.len());
         for qi in qis {
             let fallback = base_col_name(&qi.column_name);
             let idx = headers
                 .iter()
                 .position(|h| h == &qi.column_name)
                 .or_else(|| headers.iter().position(|h| h == &fallback))
-                .ok_or_else(|| validation("GENERALIZATION_FAILED", "QI column missing in chunk", &qi.column_name))?;
-            col_idx.push(idx);
+                .ok_or_else(|| validation("DATA_COLUMN_MISSING", "Quasi-identifier column not found in CSV header", &qi.column_name))?;
+            out.push(idx);
         }
+        out
+    };
 
-        if !domains_built {
-            let mut cat_sets: Vec<BTreeSet<String>> = vec![BTreeSet::new(); qis.len()];
-            for line in lines.by_ref() {
-                let line = line.map_err(|e| validation("GENERALIZATION_FAILED", "failed reading chunk row", &e.to_string()))?;
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let fields = split_csv_line_basic(&line);
-                for i in 0..qis.len() {
-                    if !qis[i].is_categorical || col_idx[i] >= fields.len() {
-                        continue;
-                    }
+    // Pass 1: Build categorical domains from ALL chunks so no value is missed
+    let mut cat_sets: Vec<BTreeSet<String>> = vec![BTreeSet::new(); qis.len()];
+    for chunk in chunk_paths {
+        let f = fs::File::open(chunk)?;
+        let mut lines = BufReader::new(f).lines();
+        let _ = lines.next(); // skip header
+        for line in lines {
+            let line = line.map_err(|e| validation("GENERALIZATION_FAILED", "failed reading chunk row", &e.to_string()))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let fields = split_csv_line_basic(&line);
+            for i in 0..qis.len() {
+                if qis[i].is_categorical && col_idx[i] < fields.len() {
                     cat_sets[i].insert(fields[col_idx[i]].trim().to_string());
                 }
             }
-            for i in 0..qis.len() {
-                if qis[i].is_categorical {
-                    categorical_domains[i] = cat_sets[i].iter().cloned().collect();
-                }
-            }
-            domains_built = true;
-
-            let f2 = fs::File::open(chunk)?;
-            let r2 = BufReader::new(f2);
-            lines = r2.lines();
-            let _ = lines.next();
         }
+    }
+    let categorical_domains: Vec<Vec<String>> =
+        cat_sets.into_iter().map(|s| s.into_iter().collect()).collect();
+
+    // Pass 2: Build histogram from all chunks using the complete domain sets
+    let mut hist: SparseHist = BTreeMap::new();
+    let mut total_records: i64 = 0;
+
+    for chunk in chunk_paths {
+        let f = fs::File::open(chunk)?;
+        let mut lines = BufReader::new(f).lines();
+        let _ = lines.next(); // skip header
 
         for line in lines {
             let line = line.map_err(|e| validation("GENERALIZATION_FAILED", "failed reading chunk row", &e.to_string()))?;
@@ -427,49 +424,42 @@ fn compute_dm_star_sparse(hist: &SparseHist, k: i64) -> (i64, i64) {
     (dm, eq)
 }
 
+/// Mark every unmarked descendant of `node` (all dims ≥ node) as passing.
+/// Only levels ≥ `node_level` are scanned — descendants cannot live at lower levels.
+/// Replaces the old O(N²) BFS with a single O(N) linear scan over the relevant slice.
 fn mark_subtree_pass(
     tree: &[Vec<Vec<i64>>],
     node_status: &mut BTreeMap<Vec<i64>, Option<bool>>,
     node: &[i64],
+    node_level: usize,
 ) {
-    let mut q = VecDeque::new();
-    q.push_back(node.to_vec());
-    while let Some(current) = q.pop_front() {
-        if node_status.get(&current).and_then(|v| *v).is_none() {
-            node_status.insert(current.clone(), Some(true));
-        }
-        for level in tree {
-            for child in level {
-                if child.iter().zip(current.iter()).all(|(c, p)| c >= p)
-                    && node_status.get(child).copied().flatten().is_none()
-                {
-                    node_status.insert(child.clone(), Some(true));
-                    q.push_back(child.clone());
-                }
+    for level in &tree[node_level..] {
+        for candidate in level {
+            if node_status.get(candidate).copied().flatten().is_none()
+                && candidate.iter().zip(node.iter()).all(|(c, p)| c >= p)
+            {
+                node_status.insert(candidate.clone(), Some(true));
             }
         }
     }
 }
 
+/// Mark every unmarked ancestor of `node` (all dims ≤ node) as failing.
+/// Only levels ≤ `node_level` are scanned — ancestors cannot live at higher levels.
+/// Replaces the old O(N²) BFS with a single O(N) linear scan over the relevant slice.
 fn mark_parents_fail(
     tree: &[Vec<Vec<i64>>],
     node_status: &mut BTreeMap<Vec<i64>, Option<bool>>,
     node: &[i64],
+    node_level: usize,
 ) {
-    let mut q = VecDeque::new();
-    q.push_back(node.to_vec());
-    while let Some(current) = q.pop_front() {
-        if node_status.get(&current).copied().flatten().is_none() {
-            node_status.insert(current.clone(), Some(false));
-        }
-        for level in tree.iter().rev() {
-            for parent in level {
-                if parent.iter().zip(current.iter()).all(|(p, c)| p <= c)
-                    && node_status.get(parent).copied().flatten().is_none()
-                {
-                    node_status.insert(parent.clone(), Some(false));
-                    q.push_back(parent.clone());
-                }
+    let upper = (node_level + 1).min(tree.len());
+    for level in &tree[..upper] {
+        for candidate in level {
+            if node_status.get(candidate).copied().flatten().is_none()
+                && candidate.iter().zip(node.iter()).all(|(p, c)| p <= c)
+            {
+                node_status.insert(candidate.clone(), Some(false));
             }
         }
     }
@@ -556,9 +546,12 @@ pub fn find_ola2_best_rf_detailed(
     let allowed = suppression_limit * total_records as f64;
     let tree = build_tree_levels(qis, initial_ri, size_factors, false)?;
     let mut node_status: BTreeMap<Vec<i64>, Option<bool>> = BTreeMap::new();
-    for level in &tree {
+    // Pre-build node → level index map so mark functions can restrict their scan
+    let mut node_to_level: BTreeMap<Vec<i64>, usize> = BTreeMap::new();
+    for (level_idx, level) in tree.iter().enumerate() {
         for node in level {
             node_status.entry(node.clone()).or_insert(None);
+            node_to_level.insert(node.clone(), level_idx);
         }
     }
 
@@ -592,16 +585,17 @@ pub fn find_ola2_best_rf_detailed(
         if node_status.get(&node).copied().flatten().is_some() {
             continue;
         }
+        let node_level = node_to_level.get(&node).copied().unwrap_or(mid_level);
         let merged = merge_sparse_equivalence(base_hist, &node);
         let suppression_count = suppression_count_sparse(&merged, k);
         let passes_k = suppression_count == 0;
         if passes_k || (suppression_count as f64) <= allowed {
             node_status.insert(node.clone(), Some(true));
             pass_nodes.push(node.clone());
-            mark_subtree_pass(&tree, &mut node_status, &node);
+            mark_subtree_pass(&tree, &mut node_status, &node, node_level);
         } else {
             node_status.insert(node.clone(), Some(false));
-            mark_parents_fail(&tree, &mut node_status, &node);
+            mark_parents_fail(&tree, &mut node_status, &node, node_level);
         }
     }
 
@@ -725,110 +719,147 @@ pub fn generalize_and_write_outputs(
     }
     fs::create_dir_all(output_dir)?;
 
-    let mut output_chunk_paths = Vec::new();
-    for (idx, chunk) in chunk_paths.iter().enumerate() {
-        let f = fs::File::open(chunk)?;
-        let r = BufReader::new(f);
-        let mut lines = r.lines();
+    // Resolve column layout from first chunk header (uniform schema across all chunks)
+    let (headers, qi_src_indices, qi_output_idx) = {
+        let first = chunk_paths
+            .first()
+            .ok_or_else(|| validation("GENERALIZATION_FAILED", "no chunks provided", "generalization"))?;
+        let f = fs::File::open(first)?;
+        let mut lines = BufReader::new(f).lines();
         let header = lines
             .next()
-            .ok_or_else(|| validation("GENERALIZATION_FAILED", "chunk missing header", &chunk.display().to_string()))?
-            .map_err(|e| validation("GENERALIZATION_FAILED", "failed reading chunk header", &e.to_string()))?;
+            .ok_or_else(|| validation("GENERALIZATION_FAILED", "chunk missing header", &first.display().to_string()))?
+            .map_err(|e| validation("GENERALIZATION_FAILED", "failed reading header", &e.to_string()))?;
         let headers = split_csv_line_basic(&header);
-        let mut rows: Vec<Vec<String>> = Vec::new();
-        for line in lines {
-            let line = line.map_err(|e| validation("GENERALIZATION_FAILED", "failed reading chunk row", &e.to_string()))?;
-            rows.push(split_csv_line_basic(&line));
-        }
 
-        // Generalize QIs in place on base columns.
-        for (qi, bw) in qis.iter().zip(final_rf.iter()) {
-            if qi.is_categorical {
-                let Some(src_idx) = headers.iter().position(|h| h == &qi.column_name) else { continue; };
-                for row in &mut rows {
-                    if let Some(v) = row.get(src_idx).cloned() {
-                        row[src_idx] = generalize_categorical_value(&qi.column_name, &v, *bw);
-                    }
+        // Source column index for each QI (may differ from output index for numerical)
+        let qi_src: Vec<Option<usize>> = qis
+            .iter()
+            .map(|qi| {
+                if qi.is_categorical {
+                    headers.iter().position(|h| h == &qi.column_name)
+                } else {
+                    let src = base_col_name(&qi.column_name);
+                    headers.iter().position(|h| h == &src)
                 }
-                continue;
-            }
-            let src_col = base_col_name(&qi.column_name);
-            let Some(src_idx) = headers.iter().position(|h| h == &src_col) else { continue; };
+            })
+            .collect();
 
-            let valid_vals: Vec<i64> = rows
-                .iter()
-                .filter_map(|r| r.get(src_idx))
-                .filter_map(|s| s.trim().parse::<f64>().ok())
-                .map(|v| v.round() as i64)
-                .collect();
-            if valid_vals.is_empty() {
-                continue;
-            }
-            let min_val = *valid_vals.iter().min().unwrap_or(&0);
+        // Output QI column indices (used for EC suppression key)
+        let qi_out: Vec<usize> = qis
+            .iter()
+            .filter_map(|qi| {
+                let col = if qi.is_categorical { qi.column_name.clone() } else { base_col_name(&qi.column_name) };
+                headers.iter().position(|h| h == &col)
+            })
+            .collect();
 
-            for row in &mut rows {
-                if let Some(s) = row.get(src_idx).cloned() {
-                    if let Ok(v) = s.trim().parse::<f64>() {
-                        row[src_idx] = generalize_numeric_label(v.round() as i64, min_val, (*bw).max(1));
-                    }
+        (headers, qi_src, qi_out)
+    };
+
+    // Use global min from qi.min_value (computed across all chunks by compute_numerical_min_max)
+    let global_mins: Vec<i64> = qis.iter().map(|qi| qi.min_value.unwrap_or(0.0).floor() as i64).collect();
+
+    let mut output_chunk_paths = Vec::new();
+
+    for (chunk_idx, chunk) in chunk_paths.iter().enumerate() {
+        // --- Pass 1: generalize each row, write to temp file, accumulate EC counts ---
+        let tmp_path = output_dir.join(format!("_gen_tmp_{chunk_idx}.csv"));
+        let mut class_counts: BTreeMap<Vec<String>, i64> = BTreeMap::new();
+
+        {
+            let f = fs::File::open(chunk)?;
+            let mut lines = BufReader::new(f).lines();
+            let _ = lines.next(); // skip header
+
+            let mut w = BufWriter::new(fs::File::create(&tmp_path)?);
+            w.write_all(headers.join(",").as_bytes())?;
+            w.write_all(b"\n")?;
+
+            for line in lines {
+                let line = line.map_err(|e| {
+                    validation("GENERALIZATION_FAILED", "failed reading chunk row", &e.to_string())
+                })?;
+                if line.trim().is_empty() {
+                    continue;
                 }
-            }
-        }
+                let mut fields = split_csv_line_basic(&line);
 
-        // Suppress (mark '*') QI-only columns for classes < k.
-        let mut qi_output_idx: Vec<usize> = Vec::with_capacity(qis.len());
-        for qi in qis {
-            let out_col = if qi.is_categorical {
-                qi.column_name.clone()
-            } else {
-                base_col_name(&qi.column_name)
-            };
-            if let Some(i) = headers.iter().position(|h| h == &out_col) {
-                qi_output_idx.push(i);
-            }
-        }
-
-        if !qi_output_idx.is_empty() && k > 1 {
-            let mut class_counts: BTreeMap<Vec<String>, i64> = BTreeMap::new();
-            for row in &rows {
-                let key: Vec<String> = qi_output_idx
-                    .iter()
-                    .map(|&i| row.get(i).cloned().unwrap_or_default())
-                    .collect();
-                *class_counts.entry(key).or_insert(0) += 1;
-            }
-            for row in &mut rows {
-                let key: Vec<String> = qi_output_idx
-                    .iter()
-                    .map(|&i| row.get(i).cloned().unwrap_or_default())
-                    .collect();
-                if class_counts.get(&key).copied().unwrap_or(0) < k {
-                    for &i in &qi_output_idx {
-                        if i < row.len() {
-                            row[i] = "*".to_string();
+                // Apply generalization in-place
+                for ((qi, bw), src_idx_opt) in qis.iter().zip(final_rf.iter()).zip(qi_src_indices.iter()) {
+                    let Some(src_idx) = src_idx_opt else { continue };
+                    if *src_idx >= fields.len() {
+                        continue;
+                    }
+                    if qi.is_categorical {
+                        let v = fields[*src_idx].clone();
+                        fields[*src_idx] = generalize_categorical_value(&qi.column_name, &v, *bw);
+                    } else {
+                        if let Ok(v) = fields[*src_idx].trim().parse::<f64>() {
+                            let qi_pos = qis.iter().position(|q| std::ptr::eq(q, qi)).unwrap_or(0);
+                            fields[*src_idx] =
+                                generalize_numeric_label(v.round() as i64, global_mins[qi_pos], (*bw).max(1));
                         }
                     }
                 }
+
+                // Accumulate EC key (generalized QI values only)
+                if !qi_output_idx.is_empty() && k > 1 {
+                    let key: Vec<String> =
+                        qi_output_idx.iter().map(|&i| fields.get(i).cloned().unwrap_or_default()).collect();
+                    *class_counts.entry(key).or_insert(0) += 1;
+                }
+
+                w.write_all(fields.join(",").as_bytes())?;
+                w.write_all(b"\n")?;
             }
+            w.flush()?;
         }
 
-        let out_headers = headers.clone();
-        let out_rows = rows;
-
-        let out_name = generalized_chunk_name(output_path, idx + 1);
+        // --- Pass 2: apply suppression using EC counts, write final chunk output ---
+        let out_name = generalized_chunk_name(output_path, chunk_idx + 1);
         let out_path = output_dir.join(out_name);
-        let mut w = BufWriter::new(fs::File::create(&out_path)?);
-        w.write_all(out_headers.join(",").as_bytes())?;
-        w.write_all(b"\n")?;
-        for row in out_rows {
-            w.write_all(row.join(",").as_bytes())?;
+        {
+            let f = fs::File::open(&tmp_path)?;
+            let mut lines = BufReader::new(f).lines();
+            let _ = lines.next(); // skip header written by pass 1
+
+            let mut w = BufWriter::new(fs::File::create(&out_path)?);
+            w.write_all(headers.join(",").as_bytes())?;
             w.write_all(b"\n")?;
+
+            for line in lines {
+                let line = line.map_err(|e| {
+                    validation("GENERALIZATION_FAILED", "failed reading temp chunk", &e.to_string())
+                })?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let mut fields = split_csv_line_basic(&line);
+
+                if !qi_output_idx.is_empty() && k > 1 {
+                    let key: Vec<String> =
+                        qi_output_idx.iter().map(|&i| fields.get(i).cloned().unwrap_or_default()).collect();
+                    if class_counts.get(&key).copied().unwrap_or(0) < k {
+                        for &i in &qi_output_idx {
+                            if i < fields.len() {
+                                fields[i] = "*".to_string();
+                            }
+                        }
+                    }
+                }
+
+                w.write_all(fields.join(",").as_bytes())?;
+                w.write_all(b"\n")?;
+            }
+            w.flush()?;
         }
-        w.flush()?;
+
+        let _ = fs::remove_file(&tmp_path);
         output_chunk_paths.push(out_path);
     }
 
-    // combine chunk outputs
+    // Merge chunk outputs into single final file
     let final_path = if Path::new(output_path).is_absolute() {
         PathBuf::from(output_path)
     } else {
@@ -839,9 +870,11 @@ pub fn generalize_and_write_outputs(
         let f = fs::File::open(p)?;
         let r = BufReader::new(f);
         for (line_no, line) in r.lines().enumerate() {
-            let line = line.map_err(|e| validation("GENERALIZATION_FAILED", "failed reading generalized chunk", &e.to_string()))?;
+            let line = line.map_err(|e| {
+                validation("GENERALIZATION_FAILED", "failed reading generalized chunk", &e.to_string())
+            })?;
             if i > 0 && line_no == 0 {
-                continue;
+                continue; // skip repeated header
             }
             final_writer.write_all(line.as_bytes())?;
             final_writer.write_all(b"\n")?;

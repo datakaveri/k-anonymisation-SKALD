@@ -1,21 +1,13 @@
 use crate::pipeline::bootstrap::{split_csv_line_basic, validation, PipelineError, RuntimeConfig};
 use crate::pipeline::pyffx_compat::fpe_encrypt;
 use hmac::{Hmac, Mac};
+use regex::Regex;
 use serde_json::Value;
 use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-
-fn fnv1a64(input: &str) -> u64 {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for b in input.as_bytes() {
-        hash ^= *b as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
-}
 
 /// Generate a random 32-hex-char (16-byte) key from /dev/urandom.
 /// Falls back to zeroed bytes only if the OS RNG is unavailable — still better
@@ -29,8 +21,22 @@ fn generate_random_key_hex() -> String {
     hex::encode(buf)
 }
 
+/// Generate a random 64-hex-char (32-byte) salt from /dev/urandom.
+fn generate_random_salt_hex() -> String {
+    use std::io::Read;
+    let mut buf = [0u8; 32];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut buf);
+    }
+    hex::encode(buf)
+}
+
+/// SHA-256 hash of input — returns 64-char lowercase hex string (matches Python hashlib.sha256).
 fn hash_hex(input: &str) -> String {
-    format!("{:016x}", fnv1a64(input))
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(input.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 fn should_skip_value(v: &str) -> bool {
@@ -239,34 +245,30 @@ fn parse_encrypt_config(entry: &Value) -> Result<EncryptConfigLite, PipelineErro
     Ok(EncryptConfigLite { column: column.clone(), format_preserving })
 }
 
-struct SimpleRng {
-    state: u64,
-}
-
-impl SimpleRng {
-    fn new(seed: u64) -> Self {
-        Self { state: seed.max(1) }
+/// Replace each character with a random character of the same class (digit/upper/lower).
+/// Uses /dev/urandom for true randomness — different output each run (matches Python secrets.choice).
+fn randomize_preserving_class(value: &str) -> String {
+    use std::io::Read;
+    let char_count = value.chars().count();
+    let byte_count = char_count * 4;
+    let mut random_bytes = vec![0u8; byte_count];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut random_bytes);
     }
-    fn next_u32(&mut self) -> u32 {
-        let mut x = self.state;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.state = x;
-        (x.wrapping_mul(2685821657736338717) >> 32) as u32
-    }
-}
-
-fn randomize_preserving_class(value: &str, seed: u64) -> String {
-    let mut rng = SimpleRng::new(seed);
     let mut out = String::with_capacity(value.len());
-    for c in value.chars() {
+    for (i, c) in value.chars().enumerate() {
+        let r = u32::from_le_bytes([
+            random_bytes[i * 4],
+            random_bytes[i * 4 + 1],
+            random_bytes[i * 4 + 2],
+            random_bytes[i * 4 + 3],
+        ]);
         if c.is_ascii_digit() {
-            out.push((b'0' + (rng.next_u32() % 10) as u8) as char);
+            out.push((b'0' + (r % 10) as u8) as char);
         } else if c.is_ascii_uppercase() {
-            out.push((b'A' + (rng.next_u32() % 26) as u8) as char);
+            out.push((b'A' + (r % 26) as u8) as char);
         } else if c.is_ascii_lowercase() {
-            out.push((b'a' + (rng.next_u32() % 26) as u8) as char);
+            out.push((b'a' + (r % 26) as u8) as char);
         } else {
             out.push(c);
         }
@@ -274,14 +276,36 @@ fn randomize_preserving_class(value: &str, seed: u64) -> String {
     out
 }
 
+// ── Regex pattern config (mirrors Python's per-pattern dict) ─────────────────
+
+#[derive(Debug, Clone)]
+enum RegexPatternKind {
+    /// Literal regex string provided directly
+    Literal(String),
+    /// Derived from type=before/after/in_between + delimiter/start/end
+    Derived { pattern_type: String, delimiter: Option<String>, start: Option<String>, end: Option<String> },
+}
+
+#[derive(Debug, Clone)]
+struct RegexPatternConfig {
+    kind:         RegexPatternKind,
+    masking_char: char,
+    /// Optional length for type=before/after delimiter-length masking
+    length:       Option<usize>,
+    /// Optional { "1": "full"|"partial", ... } group masking
+    mask_groups:  Vec<(usize, String)>,
+}
+
 #[derive(Debug)]
 struct MaskingConfigLite {
-    column: String,
-    masking_char: char,
+    column:             String,
+    masking_char:       char,
     characters_to_mask: Vec<usize>,
+    regex_patterns:     Vec<RegexPatternConfig>,
+    apply_order:        Vec<String>,
     class_masking_mode: Option<String>,
-    class_letter: char,
-    class_digit: char,
+    class_letter:       char,
+    class_digit:        char,
 }
 
 fn parse_masking_config(entry: &Value) -> Result<MaskingConfigLite, PipelineError> {
@@ -304,6 +328,7 @@ fn parse_masking_config(entry: &Value) -> Result<MaskingConfigLite, PipelineErro
         .next()
         .ok_or_else(|| validation("PREPROCESS_CONFIG_INVALID", "masking_char cannot be empty", &column))?;
 
+    // characters_to_mask
     let mut characters_to_mask = Vec::new();
     if let Some(arr) = obj.get("characters_to_mask").and_then(Value::as_array) {
         for v in arr {
@@ -316,64 +341,273 @@ fn parse_masking_config(entry: &Value) -> Result<MaskingConfigLite, PipelineErro
         }
     }
 
-    let class_masking_mode = obj.get("class_masking_mode").and_then(Value::as_str).map(|s| s.to_string());
-    let class_letter = obj
-        .get("class_mask_letter")
-        .and_then(Value::as_str)
-        .unwrap_or("X")
-        .chars()
-        .next()
-        .unwrap_or('X');
-    let class_digit = obj
-        .get("class_mask_digit")
-        .and_then(Value::as_str)
-        .unwrap_or("0")
-        .chars()
-        .next()
-        .unwrap_or('0');
+    // regex_patterns
+    let mut regex_patterns: Vec<RegexPatternConfig> = Vec::new();
+    if let Some(arr) = obj.get("regex_patterns").and_then(Value::as_array) {
+        for pat in arr {
+            let pobj = pat.as_object().ok_or_else(|| {
+                validation("PREPROCESS_CONFIG_INVALID", "Each regex_patterns entry must be an object", &column)
+            })?;
 
-    Ok(MaskingConfigLite {
-        column,
-        masking_char,
-        characters_to_mask,
-        class_masking_mode,
-        class_letter,
-        class_digit,
-    })
-}
+            let pat_masking_char = pobj
+                .get("masking_char")
+                .and_then(Value::as_str)
+                .map(|s| s.chars().next().unwrap_or(masking_char))
+                .unwrap_or(masking_char);
 
-fn apply_masking_value(value: &str, cfg: &MaskingConfigLite, seed: u64) -> String {
-    let mut masked = value.to_string();
+            let length = pobj.get("length").and_then(Value::as_i64).map(|n| n.max(0) as usize);
 
-    if !cfg.characters_to_mask.is_empty() {
-        let mut chars: Vec<char> = masked.chars().collect();
-        for pos in &cfg.characters_to_mask {
-            let idx = pos.saturating_sub(1);
-            if idx < chars.len() {
-                chars[idx] = cfg.masking_char;
-            }
-        }
-        masked = chars.into_iter().collect();
-    }
-
-    match cfg.class_masking_mode.as_deref() {
-        Some("random_class") => {
-            masked = randomize_preserving_class(&masked, seed);
-        }
-        Some("fixed_class") => {
-            let mut out = String::with_capacity(masked.len());
-            for c in masked.chars() {
-                if c.is_ascii_digit() {
-                    out.push(cfg.class_digit);
-                } else if c.is_ascii_alphabetic() {
-                    out.push(cfg.class_letter);
-                } else {
-                    out.push(c);
+            // mask_groups: {"1": "full", "2": "partial"}
+            let mut mask_groups: Vec<(usize, String)> = Vec::new();
+            if let Some(mg) = pobj.get("mask_groups").and_then(Value::as_object) {
+                for (k, v) in mg {
+                    if let (Ok(idx), Some(mode)) = (k.parse::<usize>(), v.as_str()) {
+                        mask_groups.push((idx, mode.to_string()));
+                    }
                 }
             }
-            masked = out;
+
+            let kind = if let Some(r) = pobj.get("regex").and_then(Value::as_str) {
+                RegexPatternKind::Literal(r.to_string())
+            } else {
+                let pattern_type = pobj.get("type").and_then(Value::as_str).unwrap_or("").to_lowercase();
+                let delimiter    = pobj.get("delimiter").and_then(Value::as_str).map(|s| s.to_string());
+                let start        = pobj.get("start").and_then(Value::as_str).map(|s| s.to_string());
+                let end          = pobj.get("end").and_then(Value::as_str).map(|s| s.to_string());
+                RegexPatternKind::Derived { pattern_type, delimiter, start, end }
+            };
+
+            regex_patterns.push(RegexPatternConfig { kind, masking_char: pat_masking_char, length, mask_groups });
+        }
+    }
+
+    // apply_order — default ["characters", "regex", "class"]
+    let apply_order: Vec<String> = obj
+        .get("apply_order")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_else(|| vec!["characters".to_string(), "regex".to_string(), "class".to_string()]);
+
+    let class_masking_mode = obj.get("class_masking_mode").and_then(Value::as_str).map(|s| s.to_string());
+    let class_letter = obj.get("class_mask_letter").and_then(Value::as_str)
+        .unwrap_or("X").chars().next().unwrap_or('X');
+    let class_digit  = obj.get("class_mask_digit").and_then(Value::as_str)
+        .unwrap_or("0").chars().next().unwrap_or('0');
+
+    Ok(MaskingConfigLite { column, masking_char, characters_to_mask, regex_patterns, apply_order, class_masking_mode, class_letter, class_digit })
+}
+
+// ── Regex helpers (mirrors Python _derive_regex / _apply_delimiter_length_mask) ──
+
+/// Build a regex string from a semantic type descriptor — exact Python logic.
+fn derive_regex(pattern_type: &str, delimiter: Option<&str>, start: Option<&str>, end: Option<&str>) -> String {
+    match pattern_type {
+        "before" => {
+            if let Some(d) = delimiter {
+                return format!("^.+?(?={})", regex::escape(d));
+            }
+        }
+        "after" => {
+            if let Some(d) = delimiter {
+                return format!("(?<={}).+$", regex::escape(d));
+            }
+        }
+        "in_between" => {
+            if let (Some(s), Some(e)) = (start, end) {
+                if e == "$" {
+                    return format!("(?<={}).+$", regex::escape(s));
+                }
+                return format!("(?<={}).+?(?={})", regex::escape(s), regex::escape(e));
+            }
         }
         _ => {}
+    }
+    String::new()
+}
+
+/// Apply length-limited masking before/after a delimiter — exact Python logic.
+fn apply_delimiter_length_mask(text: &str, pattern_type: &str, delimiter: &str, length: usize, mask_char: char) -> (String, bool) {
+    if delimiter.is_empty() || length == 0 {
+        return (text.to_string(), false);
+    }
+    let mut chars: Vec<char> = text.chars().collect();
+    let text_str = text;
+    let mut changed = false;
+    let mut search_start = 0usize;
+
+    loop {
+        // find delimiter byte offset from search_start
+        let Some(byte_idx) = text_str[search_start..].find(delimiter) else { break };
+        let abs_byte = search_start + byte_idx;
+
+        // convert byte offset to char offset
+        let char_before = text_str[..abs_byte].chars().count();
+        let delim_char_len = delimiter.chars().count();
+
+        let (start_ci, end_ci) = if pattern_type == "after" {
+            let s = char_before + delim_char_len;
+            (s, (s + length).min(chars.len()))
+        } else {
+            // before
+            let e = char_before;
+            (e.saturating_sub(length), e)
+        };
+
+        for i in start_ci..end_ci {
+            chars[i] = mask_char;
+            changed = true;
+        }
+
+        search_start = abs_byte + delimiter.len();
+        if search_start >= text_str.len() { break; }
+    }
+
+    (chars.into_iter().collect(), changed)
+}
+
+/// Apply a single RegexPatternConfig to one string value.
+fn apply_regex_pattern(value: &str, pat: &RegexPatternConfig, _column: &str) -> String {
+    let mask_char = pat.masking_char;
+
+    // 1. Delimiter-length masking (takes priority over regex when `length` is set)
+    if let Some(length) = pat.length {
+        let (pattern_type, delimiter) = match &pat.kind {
+            RegexPatternKind::Derived { pattern_type, delimiter, .. } => {
+                (pattern_type.as_str(), delimiter.as_deref().unwrap_or(""))
+            }
+            _ => ("", ""),
+        };
+        if !delimiter.is_empty() && (pattern_type == "before" || pattern_type == "after") {
+            let (result, changed) = apply_delimiter_length_mask(value, pattern_type, delimiter, length, mask_char);
+            if changed {
+                return result;
+            }
+        }
+    }
+
+    // 2. Build the regex string
+    let regex_str: String = match &pat.kind {
+        RegexPatternKind::Literal(r) => r.clone(),
+        RegexPatternKind::Derived { pattern_type, delimiter, start, end } => {
+            derive_regex(pattern_type, delimiter.as_deref(), start.as_deref(), end.as_deref())
+        }
+    };
+
+    if regex_str.is_empty() {
+        return value.to_string();
+    }
+
+    // 3. Compile — fall back to derived if literal is invalid
+    let compiled = match Regex::new(&regex_str) {
+        Ok(r) => r,
+        Err(_) => {
+            // Try derived pattern as fallback (mirrors Python warning + fallback)
+            if let RegexPatternKind::Literal(_) = &pat.kind {
+                // already a literal, nothing to fall back to
+                return value.to_string();
+            }
+            return value.to_string();
+        }
+    };
+
+    // 4. Apply — group masking or full-match masking
+    if !pat.mask_groups.is_empty() {
+        apply_regex_group_mask(value, &compiled, &pat.mask_groups, mask_char)
+    } else {
+        let mut result = String::with_capacity(value.len());
+        let mut last = 0usize;
+        let mut replaced = 0usize;
+        for m in compiled.find_iter(value) {
+            result.push_str(&value[last..m.start()]);
+            result.push_str(&mask_char.to_string().repeat(m.as_str().chars().count()));
+            last = m.end();
+            replaced += 1;
+        }
+        result.push_str(&value[last..]);
+
+        // Data-adaptive fallback for in_between when no match found (mirrors Python)
+        if replaced == 0 {
+            if let RegexPatternKind::Derived { pattern_type, .. } = &pat.kind {
+                if pattern_type == "in_between" && value.contains(' ') {
+                    if let Ok(space_re) = Regex::new(r"(?<=\s).+$") {
+                        return space_re.replace_all(value, |m: &regex::Captures| {
+                            mask_char.to_string().repeat(m[0].chars().count())
+                        }).to_string();
+                    }
+                }
+            }
+        }
+
+        result
+    }
+}
+
+/// Apply group-based masking: full = mask all chars, partial = keep first, mask rest.
+fn apply_regex_group_mask(value: &str, re: &Regex, mask_groups: &[(usize, String)], default_mask: char) -> String {
+    re.replace_all(value, |caps: &regex::Captures| {
+        let full_match = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+        let mut rebuilt = full_match.to_string();
+        for (group_idx, mode) in mask_groups {
+            if let Some(group_match) = caps.get(*group_idx) {
+                let original = group_match.as_str();
+                let replacement = match mode.as_str() {
+                    "full" => default_mask.to_string().repeat(original.chars().count()),
+                    "partial" => {
+                        if original.chars().count() <= 1 {
+                            original.to_string()
+                        } else {
+                            let mut chars = original.chars();
+                            let first = chars.next().unwrap().to_string();
+                            let rest = default_mask.to_string().repeat(original.chars().count() - 1);
+                            first + &rest
+                        }
+                    }
+                    _ => original.to_string(),
+                };
+                rebuilt = rebuilt.replacen(original, &replacement, 1);
+            }
+        }
+        rebuilt
+    }).to_string()
+}
+
+fn apply_masking_value(value: &str, cfg: &MaskingConfigLite) -> String {
+    let mut masked = value.to_string();
+
+    for step in &cfg.apply_order {
+        match step.as_str() {
+            "characters" if !cfg.characters_to_mask.is_empty() => {
+                let mut chars: Vec<char> = masked.chars().collect();
+                for pos in &cfg.characters_to_mask {
+                    let idx = pos.saturating_sub(1);
+                    if idx < chars.len() {
+                        chars[idx] = cfg.masking_char;
+                    }
+                }
+                masked = chars.into_iter().collect();
+            }
+            "regex" if !cfg.regex_patterns.is_empty() => {
+                for pat in &cfg.regex_patterns {
+                    masked = apply_regex_pattern(&masked, pat, &cfg.column);
+                }
+            }
+            "class" => {
+                masked = match cfg.class_masking_mode.as_deref() {
+                    Some("random_class") => randomize_preserving_class(&masked),
+                    Some("fixed_class") => {
+                        let mut out = String::with_capacity(masked.len());
+                        for c in masked.chars() {
+                            if c.is_ascii_digit() { out.push(cfg.class_digit); }
+                            else if c.is_ascii_alphabetic() { out.push(cfg.class_letter); }
+                            else { out.push(c); }
+                        }
+                        out
+                    }
+                    _ => masked,
+                };
+            }
+            _ => {}
+        }
     }
 
     masked
@@ -445,6 +679,10 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
         }
     }
 
+    // Per-column random salts for salted hashing — generated fresh each run (matches Python behavior).
+    // Not persisted to disk; consistent within a run across all chunks for the same column.
+    let mut hash_salts: BTreeMap<String, String> = BTreeMap::new();
+
     let fpe_keys_path = out_dir.join("fpe_keys.json");
     let mut fpe_keys = read_json_map_string(&fpe_keys_path)?;
 
@@ -504,7 +742,10 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                 .iter()
                 .position(|h| h == col)
                 .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for salted hashing", col))?;
-            let salt = format!("skald_salt_{}", hash_hex(col));
+            let salt = hash_salts
+                .entry(col.clone())
+                .or_insert_with(generate_random_salt_hex)
+                .clone();
             for row in &mut rows {
                 if idx >= row.len() {
                     continue;
@@ -513,7 +754,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                 if should_skip_value(&v) {
                     continue;
                 }
-                row[idx] = hash_hex(&(salt.clone() + &v));
+                row[idx] = hash_hex(&format!("{}{}", salt, v));
             }
         }
 
@@ -539,7 +780,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                 .iter()
                 .position(|h| h == &m.column)
                 .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for masking", &m.column))?;
-            for (r_i, row) in rows.iter_mut().enumerate() {
+            for row in rows.iter_mut() {
                 if idx >= row.len() {
                     continue;
                 }
@@ -547,8 +788,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                 if should_skip_value(&v) {
                     continue;
                 }
-                let seed = fnv1a64(&format!("{}::{}::{}", m.column, r_i, v));
-                row[idx] = apply_masking_value(&v, m, seed);
+                row[idx] = apply_masking_value(&v, m);
             }
         }
 
@@ -557,7 +797,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                 .iter()
                 .position(|h| h == col)
                 .ok_or_else(|| validation("PREPROCESS_COLUMN_MISSING", "Column not found in CSV header for charcloak", col))?;
-            for (r_i, row) in rows.iter_mut().enumerate() {
+            for row in rows.iter_mut() {
                 if idx >= row.len() {
                     continue;
                 }
@@ -565,8 +805,7 @@ pub fn preprocess_chunks(chunks: &[PathBuf], cfg: &RuntimeConfig) -> Result<(), 
                 if should_skip_value(&v) {
                     continue;
                 }
-                let seed = fnv1a64(&format!("charcloak::{}::{}::{}", col, r_i, v));
-                row[idx] = randomize_preserving_class(&v, seed);
+                row[idx] = randomize_preserving_class(&v);
             }
         }
 

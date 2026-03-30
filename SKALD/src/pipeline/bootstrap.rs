@@ -495,11 +495,55 @@ pub fn list_non_empty_csvs(data_dir: &Path) -> Result<Vec<PathBuf>, PipelineErro
     Ok(out)
 }
 
+/// Read MemAvailable from /proc/meminfo. Returns None on any parse failure.
+pub fn available_ram_bytes() -> Option<u64> {
+    let raw = fs::read_to_string("/proc/meminfo").ok()?;
+    for line in raw.lines() {
+        if let Some(rest) = line.strip_prefix("MemAvailable:") {
+            let kb = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+            return Some(kb.saturating_mul(1024));
+        }
+    }
+    None
+}
+
+/// Sample up to `n` data rows from `path` and return their average byte length.
+/// Returns a fallback of 256 bytes if the file can't be read or has no data rows.
+fn sample_avg_row_bytes(path: &Path, n: usize) -> usize {
+    let Ok(file) = fs::File::open(path) else { return 256 };
+    let mut lines = BufReader::new(file).lines();
+    lines.next(); // skip header
+    let mut total = 0usize;
+    let mut count = 0usize;
+    for line in lines.take(n) {
+        if let Ok(l) = line {
+            total += l.len() + 1; // +1 for newline
+            count += 1;
+        }
+    }
+    if count == 0 { 256 } else { (total / count).max(1) }
+}
+
+/// Compute rows-per-chunk so that one chunk fits comfortably in RAM.
+///
+/// Target: use at most 20% of available RAM per chunk. The pipeline also holds
+/// the sparse histogram and preprocessing buffers simultaneously, so staying
+/// well below 50% gives enough headroom on any machine.
+///
+/// Clamped to [1_000, 10_000_000] so we never make absurdly tiny or huge chunks.
+fn compute_rows_per_chunk(avg_row_bytes: usize) -> usize {
+    const MIN_ROWS: usize = 1_000;
+    const MAX_ROWS: usize = 10_000_000;
+    const RAM_FRACTION: f64 = 0.20;
+
+    let ram = available_ram_bytes().unwrap_or(512 * 1024 * 1024); // default 512 MB
+    let target = ((ram as f64 * RAM_FRACTION) / avg_row_bytes as f64) as usize;
+    target.clamp(MIN_ROWS, MAX_ROWS)
+}
+
 pub fn split_csv_by_ram(
     data_dir: &Path,
     chunks_dir: &Path,
-    _available_ram_override: Option<u64>,
-    rows_per_chunk_override: Option<usize>,
 ) -> Result<(Vec<PathBuf>, usize), PipelineError> {
     fs::create_dir_all(chunks_dir)?;
     let csvs = list_non_empty_csvs(data_dir)?;
@@ -511,6 +555,11 @@ pub fn split_csv_by_ram(
         ));
     }
     let input = &csvs[0];
+
+    // Sample before opening the streaming reader so we can seek back to the start.
+    let avg_row_bytes = sample_avg_row_bytes(input, 200);
+    let rows_per_chunk = compute_rows_per_chunk(avg_row_bytes);
+
     let file = fs::File::open(input)
         .map_err(|e| io_err("open CSV file", &input.display().to_string(), e))?;
     let reader = BufReader::new(file);
@@ -520,7 +569,6 @@ pub fn split_csv_by_ram(
         .ok_or_else(|| validation("DATA_EMPTY", "CSV file contains no header row", &input.display().to_string()))?
         .map_err(|e| io_err("read CSV header", &input.display().to_string(), e))?;
 
-    let rows_per_chunk = rows_per_chunk_override.unwrap_or(50_000).max(1000);
     let mut chunk_paths = Vec::new();
     let mut chunk_idx = 1usize;
     let mut row_count = 0usize;

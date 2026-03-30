@@ -3,8 +3,8 @@ use crate::pipeline::anonymization::{
     find_ola1_initial_ri, find_ola2_best_rf_detailed, generalize_and_write_outputs,
 };
 use crate::pipeline::bootstrap::{
-    ensure_output_dir, find_first_json_config, parse_runtime_config, split_csv_by_ram,
-    Logger, PipelineError, StatusPayload,
+    available_ram_bytes, ensure_output_dir, find_first_json_config, parse_runtime_config,
+    split_csv_by_ram, Logger, PipelineError, StatusPayload,
 };
 use crate::pipeline::preprocess::preprocess_chunks;
 use serde_json::json;
@@ -27,7 +27,7 @@ pub fn run_pipeline(root: &Path) -> Result<StatusPayload, PipelineError> {
     ));
 
     log.info("chunking", "Splitting CSV into RAM-sized chunks");
-    let (chunk_paths, rows_per_chunk) = split_csv_by_ram(&root.join("data"), &root.join("chunks"), None, None)?;
+    let (chunk_paths, rows_per_chunk) = split_csv_by_ram(&root.join("data"), &root.join("chunks"))?;
     log.info("chunking", &format!(
         "{} chunk(s), ~{} rows/chunk",
         chunk_paths.len(),
@@ -65,7 +65,7 @@ pub fn run_pipeline(root: &Path) -> Result<StatusPayload, PipelineError> {
     let qis = build_quasi_identifiers(&cfg, &dynamic_min_max)?;
     log.info("qi_building", &format!("{} quasi-identifier(s) built", qis.len()));
 
-    let max_eq = estimate_available_ram_bytes().unwrap_or(32_000_000) / 32;
+    let max_eq = (available_ram_bytes().unwrap_or(32_000_000) / 32) as i64;
     log.info("ola1", &format!(
         "OLA-1: finding initial RI (max_eq={}, chunks={})",
         max_eq,
@@ -141,6 +141,9 @@ pub fn run_pipeline(root: &Path) -> Result<StatusPayload, PipelineError> {
         output_dir_path.join(&cfg.output_path).display().to_string()
     };
 
+    // Read first 10 rows of the anonymized output CSV as a JSON array of objects
+    let sample_generalized_rows = read_csv_sample(&final_output_path, 10);
+
     Ok(StatusPayload {
         status: "success".to_string(),
         phase: Some("done".to_string()),
@@ -164,22 +167,49 @@ pub fn run_pipeline(root: &Path) -> Result<StatusPayload, PipelineError> {
             "top_ola2_nodes": ola2.top_nodes,
             "total_records": total_records,
             "final_output_path": final_output_path,
+            "sample_generalized_rows": sample_generalized_rows,
         })),
         error: None,
         log_file: "output/pipeline.log".to_string(),
     })
 }
 
-fn estimate_available_ram_bytes() -> Option<i64> {
-    let raw = fs::read_to_string("/proc/meminfo").ok()?;
-    for line in raw.lines() {
-        if let Some(rest) = line.strip_prefix("MemAvailable:") {
-            let kb = rest
-                .split_whitespace()
-                .next()
-                .and_then(|s| s.parse::<i64>().ok())?;
-            return Some(kb.saturating_mul(1024));
+/// Read the first `n` data rows from a CSV and return them as a JSON array
+/// of objects keyed by column header. Returns an empty array on any IO error.
+fn read_csv_sample(path: &str, n: usize) -> serde_json::Value {
+    use std::io::BufRead;
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(_) => return json!([]),
+    };
+    let mut lines = std::io::BufReader::new(file).lines();
+
+    let header_line = match lines.next().and_then(|r| r.ok()) {
+        Some(h) => h,
+        None => return json!([]),
+    };
+    let headers: Vec<String> = header_line.split(',').map(|s| s.trim_matches('"').to_string()).collect();
+
+    let mut rows = Vec::with_capacity(n);
+    for line in lines.take(n) {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        if line.trim().is_empty() {
+            continue;
         }
+        let values: Vec<&str> = line.split(',').collect();
+        let obj: serde_json::Map<String, serde_json::Value> = headers
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                let v = values.get(i).copied().unwrap_or("").trim_matches('"').to_string();
+                (h.clone(), serde_json::Value::String(v))
+            })
+            .collect();
+        rows.push(serde_json::Value::Object(obj));
     }
-    None
+    serde_json::Value::Array(rows)
 }
+

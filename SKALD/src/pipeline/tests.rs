@@ -116,6 +116,7 @@ fn generalize_marks_only_qi_columns() {
         is_categorical: false,
         min_value: Some(20.0),
         max_value: Some(21.0),
+        interval_hierarchy: None,
     }];
 
     generalize_and_write_outputs(
@@ -183,12 +184,14 @@ fn ola1_scales_initial_ri_when_estimated_eq_too_high() {
             is_categorical: false,
             min_value: Some(0.0),
             max_value: Some(99.0),
+            interval_hierarchy: None,
         },
         QuasiIdentifierLite {
             column_name: "Zip".to_string(),
             is_categorical: false,
             min_value: Some(10000.0),
             max_value: Some(10099.0),
+            interval_hierarchy: None,
         },
     ];
     let mut size = BTreeMap::new();
@@ -206,6 +209,7 @@ fn ola2_picks_rf_that_meets_suppression_limit() {
         is_categorical: false,
         min_value: Some(0.0),
         max_value: Some(3.0),
+        interval_hierarchy: None,
     }];
 
     let mut hist = BTreeMap::new();

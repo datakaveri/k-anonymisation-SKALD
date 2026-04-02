@@ -44,6 +44,9 @@ impl From<serde_json::Error> for PipelineError {
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     pub enable_k_anonymity: bool,
+    /// "pass1" | "pass2" | "no_bounds"
+    pub pass: String,
+    /// k is optional — not required for pass1
     pub k: i64,
     pub suppression_limit: f64,
     pub output_path: String,
@@ -60,6 +63,8 @@ pub struct RuntimeConfig {
     pub categorical_qis: Vec<String>,
     pub size_factors: BTreeMap<String, i64>,
     pub source_json_config: PathBuf,
+    /// Per-column non-uniform interval constraints: column → sorted list of (from, to) intervals
+    pub qi_interval_constraints: BTreeMap<String, Vec<(i64, i64)>>,
 }
 
 #[derive(Debug, Clone)]
@@ -412,11 +417,38 @@ pub fn parse_runtime_config(config_path: &Path) -> Result<RuntimeConfig, Pipelin
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
 
+    let pass = section
+        .get("pass")
+        .and_then(Value::as_str)
+        .unwrap_or("no_bounds")
+        .to_string();
+
     let k = section
         .get("k_anonymize")
         .and_then(|v| v.get("k"))
         .and_then(Value::as_i64)
-        .unwrap_or(2);
+        .unwrap_or(if pass == "pass1" { 0 } else { 2 });
+
+    // Per-QI non-uniform interval constraints
+    // Config shape: "qi_constraints": { "Age": { "intervals": [{"from":1,"to":10}, ...] } }
+    let mut qi_interval_constraints: BTreeMap<String, Vec<(i64, i64)>> = BTreeMap::new();
+    if let Some(obj) = section.get("qi_constraints").and_then(Value::as_object) {
+        for (col, constraint) in obj {
+            if let Some(arr) = constraint.get("intervals").and_then(Value::as_array) {
+                let intervals: Vec<(i64, i64)> = arr
+                    .iter()
+                    .filter_map(|iv| {
+                        let from = iv.get("from")?.as_i64()?;
+                        let to = iv.get("to")?.as_i64()?;
+                        if to >= from { Some((from, to)) } else { None }
+                    })
+                    .collect();
+                if !intervals.is_empty() {
+                    qi_interval_constraints.insert(col.clone(), intervals);
+                }
+            }
+        }
+    }
 
     let mut numerical_qis = Vec::new();
     let mut categorical_qis = Vec::new();
@@ -455,7 +487,8 @@ pub fn parse_runtime_config(config_path: &Path) -> Result<RuntimeConfig, Pipelin
 
     Ok(RuntimeConfig {
         enable_k_anonymity: true,
-        k: k.max(1),
+        pass,
+        k: if k <= 0 { 0 } else { k },
         suppression_limit,
         output_path,
         output_directory,
@@ -471,6 +504,7 @@ pub fn parse_runtime_config(config_path: &Path) -> Result<RuntimeConfig, Pipelin
         categorical_qis,
         size_factors,
         source_json_config: config_path.to_path_buf(),
+        qi_interval_constraints,
     })
 }
 

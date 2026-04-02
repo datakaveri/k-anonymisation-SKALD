@@ -5,12 +5,148 @@ use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+// ── Non-uniform interval hierarchy ───────────────────────────────────────────
+
+/// Precomputed halving hierarchy for a single non-uniform-interval QI.
+///
+/// Levels are 1-indexed: `levels[1]` = finest (all intervals with width ≈ 1),
+/// `levels[num_levels]` = coarsest (the user-supplied intervals).
+/// `ancestor_at[fine_idx][level]` gives the interval index at `level` for a
+/// fine interval originally indexed `fine_idx`.
+#[derive(Debug, Clone)]
+pub struct IntervalHierarchy {
+    pub levels:      Vec<Vec<(i64, i64)>>,   // 1-indexed; levels[0] is unused
+    pub ancestor_at: Vec<Vec<usize>>,         // [fine_idx][level] → coarse idx
+    pub num_levels:  usize,
+}
+
+impl IntervalHierarchy {
+    /// Map a raw data value to its fine (level-1) interval index.
+    /// Returns `None` if the value falls outside all intervals.
+    /// Uses binary search — O(log n) per call.
+    pub fn value_to_fine_index(&self, value: i64) -> Option<usize> {
+        let lv = &self.levels[1];
+        let mut lo = 0usize;
+        let mut hi = lv.len();
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let (f, t) = lv[mid];
+            if value < f { hi = mid; }
+            else if value > t { lo = mid + 1; }
+            else { return Some(mid); }
+        }
+        None
+    }
+
+    /// Number of intervals at `level` (1-indexed).
+    pub fn num_at(&self, level: usize) -> usize {
+        self.levels.get(level).map(|v| v.len()).unwrap_or(1)
+    }
+
+    /// Interval label at `level` for interval index `idx`.
+    pub fn label(&self, level: usize, idx: usize) -> String {
+        if let Some(lv) = self.levels.get(level) {
+            if let Some(&(f, t)) = lv.get(idx) {
+                return if f == t { format!("[{}]", f) } else { format!("[{}-{}]", f, t) };
+            }
+        }
+        "*".to_string()
+    }
+}
+
+/// Split each interval into `n` roughly-equal parts.
+/// The last sub-interval absorbs any remainder so no gap is introduced.
+/// Intervals with width < n are left unchanged (cannot be split into n parts).
+fn split_intervals_n(intervals: &[(i64, i64)], n: usize) -> Vec<(i64, i64)> {
+    let n = n.max(2) as i64;
+    let mut out = Vec::new();
+    for &(from, to) in intervals {
+        let width = to - from + 1;
+        if width < n {
+            out.push((from, to));
+        } else {
+            let part = width / n;
+            for i in 0..n {
+                let f = from + i * part;
+                let t = if i == n - 1 { to } else { f + part - 1 };
+                out.push((f, t));
+            }
+        }
+    }
+    out
+}
+
+/// Build a multi-level refinement hierarchy from user-supplied coarse intervals.
+///
+/// `split_factor` controls how many parts each interval is divided into at each
+/// step (2 = halving, 10 = decile split, etc.).  Splitting stops when the minimum
+/// interval width would drop below `split_factor`, i.e.
+///   `num_splits = floor(log_n(min_width))`
+/// giving `num_levels = 1 + num_splits`.
+pub fn build_interval_hierarchy(user_intervals: Vec<(i64, i64)>, split_factor: usize) -> IntervalHierarchy {
+    let n = split_factor.max(2);
+    let min_width = user_intervals
+        .iter()
+        .map(|&(f, t)| (t - f + 1).max(1))
+        .min()
+        .unwrap_or(1);
+    let num_splits = if min_width < n as i64 {
+        0
+    } else {
+        ((min_width as f64).ln() / (n as f64).ln()).floor() as usize
+    };
+    let num_levels = 1 + num_splits;
+
+    // Build from coarsest (user) down to finest, then reverse
+    let mut raw: Vec<Vec<(i64, i64)>> = vec![user_intervals];
+    for _ in 0..num_splits {
+        let prev = raw.last().unwrap().clone();
+        raw.push(split_intervals_n(&prev, n));
+    }
+    raw.reverse(); // raw[0] = finest, raw[num_splits] = coarsest
+
+    // 1-indexed: levels[0] unused, levels[1] = finest, levels[num_levels] = coarsest
+    let mut levels: Vec<Vec<(i64, i64)>> = vec![vec![]];
+    for lv in raw {
+        levels.push(lv);
+    }
+
+    let fine_count = levels[1].len();
+    // ancestor_at[fine_idx][level] = interval index at that level (binary search per level)
+    let mut ancestor_at: Vec<Vec<usize>> = vec![vec![0usize; num_levels + 1]; fine_count];
+    for fine_idx in 0..fine_count {
+        let (fine_from, _) = levels[1][fine_idx];
+        ancestor_at[fine_idx][1] = fine_idx;
+        for level in 2..=num_levels {
+            let lv = &levels[level];
+            let mut lo = 0usize;
+            let mut hi = lv.len();
+            let mut found = 0usize;
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                let (f, t) = lv[mid];
+                if fine_from < f { hi = mid; }
+                else if fine_from > t { lo = mid + 1; }
+                else { found = mid; break; }
+            }
+            ancestor_at[fine_idx][level] = found;
+        }
+    }
+
+    IntervalHierarchy { levels, ancestor_at, num_levels }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone)]
 pub struct QuasiIdentifierLite {
     pub column_name: String,
     pub is_categorical: bool,
     pub min_value: Option<f64>,
     pub max_value: Option<f64>,
+    /// Non-None when this QI uses user-defined non-uniform intervals instead of
+    /// uniform bin-width generalization.
+    pub interval_hierarchy: Option<IntervalHierarchy>,
 }
 
 impl QuasiIdentifierLite {
@@ -77,7 +213,11 @@ fn calculate_equivalence_classes_ola1(
     let mut classes = 1_i64;
     for (qi, bw) in qis.iter().zip(bin_widths.iter()) {
         let bw = (*bw).max(1);
-        let bins = if qi.is_categorical {
+        let bins = if let Some(ref h) = qi.interval_hierarchy {
+            // bw is the level number (1 = finest, num_levels = coarsest)
+            let level = (bw as usize).clamp(1, h.num_levels);
+            h.num_at(level) as i64
+        } else if qi.is_categorical {
             let max_level = max_categorical_level_ola1(&qi.column_name)?;
             (max_level / bw).max(1)
         } else {
@@ -107,7 +247,13 @@ fn build_tree_levels(
         for node in prev {
             for (i, qi) in qis.iter().enumerate() {
                 let mut new_node = node.clone();
-                if qi.is_categorical {
+                if let Some(ref h) = qi.interval_hierarchy {
+                    // Interval QI: step = increment level (1 = finest → num_levels = coarsest)
+                    let max_level = h.num_levels as i64;
+                    if new_node[i] < max_level {
+                        new_node[i] += 1;
+                    }
+                } else if qi.is_categorical {
                     let max_level = if ola1_mode {
                         max_categorical_level_ola1(&qi.column_name)?
                     } else {
@@ -212,11 +358,22 @@ pub fn build_quasi_identifiers(
 
     for qi in &cfg.numerical_qis {
         let (mn, mx) = dynamic_min_max.get(&qi.column).copied().unwrap_or((0.0, 0.0));
+        let interval_hierarchy = cfg.qi_interval_constraints
+            .get(&qi.column)
+            .map(|ivs| {
+                let split_factor = cfg.size_factors
+                    .get(&qi.column)
+                    .copied()
+                    .unwrap_or(2)
+                    .max(2) as usize;
+                build_interval_hierarchy(ivs.clone(), split_factor)
+            });
         out.push(QuasiIdentifierLite {
             column_name: qi.column.clone(),
             is_categorical: false,
             min_value: Some(mn),
             max_value: Some(mx),
+            interval_hierarchy,
         });
     }
 
@@ -226,6 +383,7 @@ pub fn build_quasi_identifiers(
             is_categorical: true,
             min_value: None,
             max_value: None,
+            interval_hierarchy: None,
         });
     }
 
@@ -360,7 +518,15 @@ pub fn build_sparse_histogram(
                     break;
                 }
                 let raw = fields[col_idx[i]].trim();
-                if qis[i].is_categorical {
+                if let Some(ref h) = qis[i].interval_hierarchy {
+                    // Interval QI: map value to fine (level-1) interval index
+                    let Ok(v) = raw.parse::<f64>() else { valid = false; break; };
+                    let v_int = v.round() as i64;
+                    match h.value_to_fine_index(v_int) {
+                        Some(idx) => idx_tuple.push(idx as i64),
+                        None => { valid = false; break; }
+                    }
+                } else if qis[i].is_categorical {
                     let Some(idx) = categorical_domains[i].iter().position(|v| v == raw).map(|v| v as i64) else {
                         valid = false;
                         break;
@@ -396,12 +562,20 @@ pub fn build_sparse_histogram(
     Ok((hist, total_records))
 }
 
-fn merge_sparse_equivalence(hist: &SparseHist, node: &[i64]) -> SparseHist {
+fn merge_histogram(hist: &SparseHist, qis: &[QuasiIdentifierLite], node: &[i64]) -> SparseHist {
     let mut merged: SparseHist = BTreeMap::new();
     for (idx, count) in hist {
         let mut m = Vec::with_capacity(idx.len());
         for (i, v) in idx.iter().enumerate() {
-            m.push(*v / node[i].max(1));
+            let mv = match qis.get(i).and_then(|qi| qi.interval_hierarchy.as_ref()) {
+                Some(h) => {
+                    let fine = *v as usize;
+                    let level = (node[i] as usize).clamp(1, h.num_levels);
+                    h.ancestor_at.get(fine).and_then(|a| a.get(level)).copied().unwrap_or(0) as i64
+                }
+                None => v / node[i].max(1),
+            };
+            m.push(mv);
         }
         *merged.entry(m).or_insert(0) += *count;
     }
@@ -467,12 +641,13 @@ fn mark_parents_fail(
 
 fn compute_top_ola2_nodes(
     base_hist: &SparseHist,
+    qis: &[QuasiIdentifierLite],
     pass_nodes: &[Vec<i64>],
     k: i64,
 ) -> Vec<Ola2NodeScore> {
     let mut out = Vec::new();
     for node in pass_nodes {
-        let merged = merge_sparse_equivalence(base_hist, node);
+        let merged = merge_histogram(base_hist, qis, node);
         let (dm, eq) = compute_dm_star_sparse(&merged, k);
         let suppression_count = suppression_count_sparse(&merged, k);
         out.push(Ola2NodeScore {
@@ -586,7 +761,7 @@ pub fn find_ola2_best_rf_detailed(
             continue;
         }
         let node_level = node_to_level.get(&node).copied().unwrap_or(mid_level);
-        let merged = merge_sparse_equivalence(base_hist, &node);
+        let merged = merge_histogram(base_hist, qis, &node);
         let suppression_count = suppression_count_sparse(&merged, k);
         let passes_k = suppression_count == 0;
         if passes_k || (suppression_count as f64) <= allowed {
@@ -607,7 +782,7 @@ pub fn find_ola2_best_rf_detailed(
         ));
     }
 
-    let scored = compute_top_ola2_nodes(base_hist, &pass_nodes, k);
+    let scored = compute_top_ola2_nodes(base_hist, qis, &pass_nodes, k);
     let best = scored
         .first()
         .ok_or_else(|| validation("GENERALIZATION_FAILED", "No valid OLA-2 node scores", "OLA-2"))?;
@@ -619,8 +794,72 @@ pub fn find_ola2_best_rf_detailed(
     })
 }
 
-pub fn equivalence_class_stats(hist: &SparseHist, rf: &[i64], k: i64) -> BTreeMap<i64, i64> {
-    let merged = merge_sparse_equivalence(hist, rf);
+/// One cell in the (k × suppression_limit) parameter grid.
+#[derive(Debug, Clone, Serialize)]
+pub struct GridEntry {
+    pub k: i64,
+    pub suppression_limit: f64,
+    /// Best generalization node found by OLA-2, empty if infeasible.
+    pub best_node: Vec<i64>,
+    pub dm_star: i64,
+    pub num_equivalence_classes: i64,
+    /// Records suppressed at the best node.
+    pub suppression_count: i64,
+    pub feasible: bool,
+}
+
+/// Run OLA-2 for a fixed sparse grid of (k, suppression_limit) pairs and return
+/// one GridEntry per cell.  Uses the already-built histogram so each OLA-2 search
+/// is a pure in-memory lattice binary search — negligible extra cost.
+pub fn compute_parameter_grid(
+    qis: &[QuasiIdentifierLite],
+    base_hist: &SparseHist,
+    initial_ri: &[i64],
+    size_factors: &BTreeMap<String, i64>,
+    total_records: i64,
+) -> Vec<GridEntry> {
+    const K_VALUES: &[i64] = &[5, 10, 50, 100];
+    const SUPP_VALUES: &[f64] = &[0.0, 0.01, 0.1];
+
+    let mut entries = Vec::with_capacity(K_VALUES.len() * SUPP_VALUES.len());
+    for &k in K_VALUES {
+        for &supp in SUPP_VALUES {
+            match find_ola2_best_rf_detailed(qis, base_hist, initial_ri, size_factors, k, supp, total_records) {
+                Ok(result) => {
+                    let suppression_count = result
+                        .top_nodes
+                        .first()
+                        .map(|n| n.suppression_count)
+                        .unwrap_or(0);
+                    entries.push(GridEntry {
+                        k,
+                        suppression_limit: supp,
+                        best_node: result.best_rf,
+                        dm_star: result.lowest_dm_star,
+                        num_equivalence_classes: result.num_equivalence_classes,
+                        suppression_count,
+                        feasible: true,
+                    });
+                }
+                Err(_) => {
+                    entries.push(GridEntry {
+                        k,
+                        suppression_limit: supp,
+                        best_node: vec![],
+                        dm_star: -1,
+                        num_equivalence_classes: 0,
+                        suppression_count: -1,
+                        feasible: false,
+                    });
+                }
+            }
+        }
+    }
+    entries
+}
+
+pub fn equivalence_class_stats(hist: &SparseHist, qis: &[QuasiIdentifierLite], rf: &[i64], k: i64) -> BTreeMap<i64, i64> {
+    let merged = merge_histogram(hist, qis, rf);
     let mut stats = BTreeMap::new();
     for v in merged.values() {
         if *v >= k {
@@ -628,6 +867,51 @@ pub fn equivalence_class_stats(hist: &SparseHist, rf: &[i64], k: i64) -> BTreeMa
         }
     }
     stats
+}
+
+/// Compute k_optimal at the coarsest constrained node.
+///
+/// For interval QIs: coarsest = num_levels (user-defined intervals).
+/// For uniform QIs: coarsest = full range collapsed to one bin.
+/// For categorical QIs: coarsest = level 3.
+///
+/// k_optimal = largest k such that the records suppressed (ECs with size < k)
+/// at the coarsest node stay within `suppression_limit * total_records`.
+pub fn compute_k_optimal(
+    qis: &[QuasiIdentifierLite],
+    base_hist: &SparseHist,
+    suppression_limit: f64,
+    total_records: i64,
+) -> i64 {
+    let coarsest: Vec<i64> = qis.iter().map(|qi| {
+        if let Some(ref h) = qi.interval_hierarchy {
+            h.num_levels as i64
+        } else if qi.is_categorical {
+            3
+        } else {
+            (qi.get_range().ceil() as i64).max(1)
+        }
+    }).collect();
+
+    let merged = merge_histogram(base_hist, qis, &coarsest);
+    let allowed = suppression_limit * total_records as f64;
+
+    let mut sizes: Vec<i64> = merged.values().copied().filter(|&v| v > 0).collect();
+    sizes.sort_unstable();
+
+    // Walk sorted sizes: prefix = records already suppressed if k = current size.
+    // k_optimal = last size where prefix <= allowed.
+    let mut prefix = 0i64;
+    let mut k_optimal = 1i64;
+    for &s in &sizes {
+        if (prefix as f64) <= allowed {
+            k_optimal = s;
+        } else {
+            break;
+        }
+        prefix += s;
+    }
+    k_optimal
 }
 
 fn generalize_numeric_label(value: i64, min_val: i64, step: i64) -> String {
@@ -791,7 +1075,15 @@ pub fn generalize_and_write_outputs(
                     if *src_idx >= fields.len() {
                         continue;
                     }
-                    if qi.is_categorical {
+                    if let Some(ref h) = qi.interval_hierarchy {
+                        if let Ok(v) = fields[*src_idx].trim().parse::<f64>() {
+                            let v_int = v.round() as i64;
+                            let level = (*bw as usize).clamp(1, h.num_levels);
+                            fields[*src_idx] = h.value_to_fine_index(v_int)
+                                .map(|fi| h.label(level, h.ancestor_at[fi][level]))
+                                .unwrap_or_else(|| "*".to_string());
+                        }
+                    } else if qi.is_categorical {
                         let v = fields[*src_idx].clone();
                         fields[*src_idx] = generalize_categorical_value(&qi.column_name, &v, *bw);
                     } else {

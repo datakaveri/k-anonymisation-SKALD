@@ -3,6 +3,9 @@
 .vscode/
 .idea/
 
+# Claude Code session data
+.claude/
+
 # Python virtual environments and caches
 venv/
 vemv/
@@ -38,7 +41,24 @@ temp/
 SKALD/temp/
 legacy_archive/
 
-# Data secrets/artifacts
+# Data files — large or pipeline-generated
+data/*.csv
 data/*.enc
 data/secret.key
 data/*.py
+data/pipeline-config-*.json
+
+# Benchmarking
+benchmark/
+
+# Python server / integration layer (Rust-only repo)
+SKALD_main.py
+SKALD_server.py
+server_config.cfg
+
+# Generated docs and release artefacts
+docs/
+RELEASE_NOTES.md
+
+# Error code scratch files
+error_codes.txt

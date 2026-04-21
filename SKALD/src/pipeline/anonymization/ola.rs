@@ -1,6 +1,6 @@
 use crate::pipeline::bootstrap::{split_csv_line_basic, validation, PipelineError, RuntimeConfig};
 use serde::Serialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -136,6 +136,25 @@ pub fn build_interval_hierarchy(user_intervals: Vec<(i64, i64)>, split_factor: u
     IntervalHierarchy { levels, ancestor_at, num_levels }
 }
 
+/// Build a single-level hierarchy from user-supplied fixed bin boundaries.
+///
+/// The resulting `IntervalHierarchy` has `num_levels = 1`, so `build_tree_levels`
+/// will never expand this dimension (max_level = 1, initial = 1 → already at max).
+/// The QI participates in equivalence-class keys (histogram includes its bin index)
+/// but is excluded from the OLA-2 lattice search.
+pub fn build_fixed_interval_hierarchy(mut intervals: Vec<(i64, i64)>) -> IntervalHierarchy {
+    intervals.sort_by_key(|&(f, _)| f);
+    let fine_count = intervals.len();
+
+    // 1-indexed: levels[0] unused, levels[1] = user's fixed bins (the only level)
+    let levels = vec![vec![], intervals];
+
+    // ancestor_at[i][1] = i (each bin maps to itself — no merging)
+    let ancestor_at: Vec<Vec<usize>> = (0..fine_count).map(|i| vec![0, i]).collect();
+
+    IntervalHierarchy { levels, ancestor_at, num_levels: 1 }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -158,7 +177,7 @@ impl QuasiIdentifierLite {
     }
 }
 
-pub type SparseHist = BTreeMap<Vec<i64>, i64>;
+pub type SparseHist = HashMap<Vec<i64>, i64>;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Ola2NodeScore {
@@ -231,7 +250,7 @@ fn calculate_equivalence_classes_ola1(
 fn build_tree_levels(
     qis: &[QuasiIdentifierLite],
     initial: &[i64],
-    size_factors: &BTreeMap<String, i64>,
+    size_factors: &HashMap<String, i64>,
     ola1_mode: bool,
 ) -> Result<Vec<Vec<Vec<i64>>>, PipelineError> {
     if qis.len() != initial.len() {
@@ -358,16 +377,19 @@ pub fn build_quasi_identifiers(
 
     for qi in &cfg.numerical_qis {
         let (mn, mx) = dynamic_min_max.get(&qi.column).copied().unwrap_or((0.0, 0.0));
-        let interval_hierarchy = cfg.qi_interval_constraints
-            .get(&qi.column)
-            .map(|ivs| {
+        // Priority: fixed_bins (lattice-excluded) > qi_interval_constraints (multi-level) > uniform
+        let interval_hierarchy = if let Some(ivs) = cfg.fixed_bins.get(&qi.column) {
+            Some(build_fixed_interval_hierarchy(ivs.clone()))
+        } else {
+            cfg.qi_interval_constraints.get(&qi.column).map(|ivs| {
                 let split_factor = cfg.size_factors
                     .get(&qi.column)
                     .copied()
                     .unwrap_or(2)
                     .max(2) as usize;
                 build_interval_hierarchy(ivs.clone(), split_factor)
-            });
+            })
+        };
         out.push(QuasiIdentifierLite {
             column_name: qi.column.clone(),
             is_categorical: false,
@@ -398,7 +420,7 @@ pub fn find_ola1_initial_ri(
     qis: &[QuasiIdentifierLite],
     _n_chunks: i64,
     max_eq: i64,
-    size_factors: &BTreeMap<String, i64>,
+    size_factors: &HashMap<String, i64>,
 ) -> Result<Vec<i64>, PipelineError> {
     if qis.is_empty() {
         return Err(validation("ANON_NO_QIS", "No quasi-identifiers defined — cannot run OLA-1", "Add at least one QI to quasi_identifiers in config"));
@@ -496,7 +518,7 @@ pub fn build_sparse_histogram(
         cat_sets.into_iter().map(|s| s.into_iter().collect()).collect();
 
     // Pass 2: Build histogram from all chunks using the complete domain sets
-    let mut hist: SparseHist = BTreeMap::new();
+    let mut hist: SparseHist = HashMap::new();
     let mut total_records: i64 = 0;
 
     for chunk in chunk_paths {
@@ -563,7 +585,7 @@ pub fn build_sparse_histogram(
 }
 
 fn merge_histogram(hist: &SparseHist, qis: &[QuasiIdentifierLite], node: &[i64]) -> SparseHist {
-    let mut merged: SparseHist = BTreeMap::new();
+    let mut merged: SparseHist = HashMap::new();
     for (idx, count) in hist {
         let mut m = Vec::with_capacity(idx.len());
         for (i, v) in idx.iter().enumerate() {
@@ -603,7 +625,7 @@ fn compute_dm_star_sparse(hist: &SparseHist, k: i64) -> (i64, i64) {
 /// Replaces the old O(N²) BFS with a single O(N) linear scan over the relevant slice.
 fn mark_subtree_pass(
     tree: &[Vec<Vec<i64>>],
-    node_status: &mut BTreeMap<Vec<i64>, Option<bool>>,
+    node_status: &mut HashMap<Vec<i64>, Option<bool>>,
     node: &[i64],
     node_level: usize,
 ) {
@@ -623,7 +645,7 @@ fn mark_subtree_pass(
 /// Replaces the old O(N²) BFS with a single O(N) linear scan over the relevant slice.
 fn mark_parents_fail(
     tree: &[Vec<Vec<i64>>],
-    node_status: &mut BTreeMap<Vec<i64>, Option<bool>>,
+    node_status: &mut HashMap<Vec<i64>, Option<bool>>,
     node: &[i64],
     node_level: usize,
 ) {
@@ -672,7 +694,7 @@ pub fn find_ola2_best_rf(
     qis: &[QuasiIdentifierLite],
     base_hist: &SparseHist,
     initial_ri: &[i64],
-    size_factors: &BTreeMap<String, i64>,
+    size_factors: &HashMap<String, i64>,
     k: i64,
     suppression_limit: f64,
     total_records: i64,
@@ -697,7 +719,7 @@ pub fn find_ola2_best_rf_detailed(
     qis: &[QuasiIdentifierLite],
     base_hist: &SparseHist,
     initial_ri: &[i64],
-    size_factors: &BTreeMap<String, i64>,
+    size_factors: &HashMap<String, i64>,
     k: i64,
     suppression_limit: f64,
     total_records: i64,
@@ -720,9 +742,9 @@ pub fn find_ola2_best_rf_detailed(
     }
     let allowed = suppression_limit * total_records as f64;
     let tree = build_tree_levels(qis, initial_ri, size_factors, false)?;
-    let mut node_status: BTreeMap<Vec<i64>, Option<bool>> = BTreeMap::new();
+    let mut node_status: HashMap<Vec<i64>, Option<bool>> = HashMap::new();
     // Pre-build node → level index map so mark functions can restrict their scan
-    let mut node_to_level: BTreeMap<Vec<i64>, usize> = BTreeMap::new();
+    let mut node_to_level: HashMap<Vec<i64>, usize> = HashMap::new();
     for (level_idx, level) in tree.iter().enumerate() {
         for node in level {
             node_status.entry(node.clone()).or_insert(None);
@@ -809,13 +831,17 @@ pub struct GridEntry {
 }
 
 /// Run OLA-2 for a fixed sparse grid of (k, suppression_limit) pairs and return
-/// one GridEntry per cell.  Uses the already-built histogram so each OLA-2 search
-/// is a pure in-memory lattice binary search — negligible extra cost.
+/// one GridEntry per cell.
+///
+/// Multi-combination OLA-2: builds the generalisation lattice once, then maintains
+/// a per-node (nk × ns) status matrix.  Each lattice-node evaluation calls
+/// `merge_histogram` exactly once; rectangle rules inside the matrix and lattice
+/// propagation across nodes amortise work over all 12 (k, σ) combinations.
 pub fn compute_parameter_grid(
     qis: &[QuasiIdentifierLite],
     base_hist: &SparseHist,
     initial_ri: &[i64],
-    size_factors: &BTreeMap<String, i64>,
+    size_factors: &HashMap<String, i64>,
     total_records: i64,
 ) -> Vec<GridEntry> {
     const K_VALUES: &[i64] = &[5, 10, 50, 100];
@@ -1049,7 +1075,7 @@ pub fn generalize_and_write_outputs(
     for (chunk_idx, chunk) in chunk_paths.iter().enumerate() {
         // --- Pass 1: generalize each row, write to temp file, accumulate EC counts ---
         let tmp_path = output_dir.join(format!("_gen_tmp_{chunk_idx}.csv"));
-        let mut class_counts: BTreeMap<Vec<String>, i64> = BTreeMap::new();
+        let mut class_counts: HashMap<Vec<String>, i64> = HashMap::new();
 
         {
             let f = fs::File::open(chunk)?;

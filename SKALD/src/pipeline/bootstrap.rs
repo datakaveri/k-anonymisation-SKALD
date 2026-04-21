@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -61,10 +61,14 @@ pub struct RuntimeConfig {
     pub fpe: Vec<Value>,
     pub numerical_qis: Vec<NumericalQiConfig>,
     pub categorical_qis: Vec<String>,
-    pub size_factors: BTreeMap<String, i64>,
+    pub size_factors: HashMap<String, i64>,
     pub source_json_config: PathBuf,
     /// Per-column non-uniform interval constraints: column → sorted list of (from, to) intervals
-    pub qi_interval_constraints: BTreeMap<String, Vec<(i64, i64)>>,
+    pub qi_interval_constraints: HashMap<String, Vec<(i64, i64)>>,
+    /// Fixed non-uniform bins: column → sorted list of (from, to) intervals.
+    /// QIs listed here are excluded from the OLA-2 lattice search (bins are fixed)
+    /// but still contribute to equivalence class keys in the histogram.
+    pub fixed_bins: HashMap<String, Vec<(i64, i64)>>,
 }
 
 #[derive(Debug, Clone)]
@@ -431,7 +435,7 @@ pub fn parse_runtime_config(config_path: &Path) -> Result<RuntimeConfig, Pipelin
 
     // Per-QI non-uniform interval constraints
     // Config shape: "qi_constraints": { "Age": { "intervals": [{"from":1,"to":10}, ...] } }
-    let mut qi_interval_constraints: BTreeMap<String, Vec<(i64, i64)>> = BTreeMap::new();
+    let mut qi_interval_constraints: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
     if let Some(obj) = section.get("qi_constraints").and_then(Value::as_object) {
         for (col, constraint) in obj {
             if let Some(arr) = constraint.get("intervals").and_then(Value::as_array) {
@@ -445,6 +449,27 @@ pub fn parse_runtime_config(config_path: &Path) -> Result<RuntimeConfig, Pipelin
                     .collect();
                 if !intervals.is_empty() {
                     qi_interval_constraints.insert(col.clone(), intervals);
+                }
+            }
+        }
+    }
+
+    // Fixed non-uniform bins — QI is excluded from lattice search but keys ECs in histogram.
+    // Config shape: "fixed_bins": { "Age": [{"from": 0, "to": 18}, {"from": 19, "to": 35}] }
+    let mut fixed_bins: HashMap<String, Vec<(i64, i64)>> = HashMap::new();
+    if let Some(obj) = section.get("fixed_bins").and_then(Value::as_object) {
+        for (col, arr_val) in obj {
+            if let Some(arr) = arr_val.as_array() {
+                let intervals: Vec<(i64, i64)> = arr
+                    .iter()
+                    .filter_map(|iv| {
+                        let from = iv.get("from")?.as_i64()?;
+                        let to = iv.get("to")?.as_i64()?;
+                        if to >= from { Some((from, to)) } else { None }
+                    })
+                    .collect();
+                if !intervals.is_empty() {
+                    fixed_bins.insert(col.clone(), intervals);
                 }
             }
         }
@@ -476,7 +501,7 @@ pub fn parse_runtime_config(config_path: &Path) -> Result<RuntimeConfig, Pipelin
         }
     }
 
-    let mut size_factors = BTreeMap::new();
+    let mut size_factors = HashMap::new();
     if let Some(obj) = section.get("size").and_then(Value::as_object) {
         for (k, v) in obj {
             if let Some(iv) = v.as_i64() {
@@ -505,6 +530,7 @@ pub fn parse_runtime_config(config_path: &Path) -> Result<RuntimeConfig, Pipelin
         size_factors,
         source_json_config: config_path.to_path_buf(),
         qi_interval_constraints,
+        fixed_bins,
     })
 }
 

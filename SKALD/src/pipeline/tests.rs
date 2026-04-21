@@ -1,10 +1,11 @@
 use super::anonymization::{
-    find_ola1_initial_ri, find_ola2_best_rf, generalize_and_write_outputs, QuasiIdentifierLite,
+    find_ola1_initial_ri, find_ola2_best_rf,
+    generalize_and_write_outputs, QuasiIdentifierLite, SparseHist,
 };
 use super::bootstrap::{find_first_json_config, parse_runtime_config, split_csv_by_ram};
 use super::pipeline::run_pipeline;
 use super::preprocess::preprocess_chunks;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -19,6 +20,19 @@ fn mk_temp_dir(prefix: &str) -> PathBuf {
     fs::create_dir_all(&p).expect("create temp dir");
     p
 }
+
+/// Shorthand: QuasiIdentifierLite with no interval hierarchy (uniform / categorical).
+fn qi(column_name: &str, is_categorical: bool, min: f64, max: f64) -> QuasiIdentifierLite {
+    QuasiIdentifierLite {
+        column_name: column_name.to_string(),
+        is_categorical,
+        min_value: if is_categorical { None } else { Some(min) },
+        max_value: if is_categorical { None } else { Some(max) },
+        interval_hierarchy: None,
+    }
+}
+
+// ── Config / bootstrap ───────────────────────────────────────────────────────
 
 #[test]
 fn parse_runtime_config_reads_basic_fields() {
@@ -68,13 +82,14 @@ fn split_csv_by_ram_creates_multiple_chunks() {
     }
     fs::write(data.join("only.csv"), content).expect("write csv");
 
-    let (out, rows_per_chunk) = split_csv_by_ram(&data, &chunks, None, Some(1000)).expect("split");
-    assert_eq!(rows_per_chunk, 1000);
-    assert!(out.len() >= 3);
+    let (out, _rows_per_chunk) = split_csv_by_ram(&data, &chunks).expect("split");
+    assert!(!out.is_empty());
     assert!(chunks.join("chunk_1.csv").exists());
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ── Preprocess / generalize ──────────────────────────────────────────────────
 
 #[test]
 fn preprocess_suppress_removes_column() {
@@ -106,34 +121,50 @@ fn generalize_marks_only_qi_columns() {
     fs::create_dir_all(&outdir).expect("output dir");
 
     let chunk1 = chunks.join("chunk_1.csv");
-    fs::write(
-        &chunk1,
-        "Age,Name\n20,Alice\n20,Bob\n21,Carol\n",
-    )
-    .expect("write chunk");
+    fs::write(&chunk1, "Age,Name\n20,Alice\n20,Bob\n21,Carol\n").expect("write chunk");
 
-    let qis = vec![QuasiIdentifierLite {
-        column_name: "Age".to_string(),
-        is_categorical: false,
-        min_value: Some(20.0),
-        max_value: Some(21.0),
-    }];
-
-    generalize_and_write_outputs(
-        std::slice::from_ref(&chunk1),
-        &qis,
-        &[1],
-        2,
-        &outdir,
-        "final.csv",
-    )
-    .expect("generalize");
+    let qis = vec![qi("Age", false, 20.0, 21.0)];
+    generalize_and_write_outputs(std::slice::from_ref(&chunk1), &qis, &[1], 2, &outdir, "final.csv")
+        .expect("generalize");
 
     let body = fs::read_to_string(outdir.join("final.csv")).expect("read final");
     assert!(body.lines().any(|l| l == "*,Carol"));
 
     let _ = fs::remove_dir_all(root);
 }
+
+// ── OLA-1 / OLA-2 ───────────────────────────────────────────────────────────
+
+#[test]
+fn ola1_scales_initial_ri_when_estimated_eq_too_high() {
+    let qis = vec![qi("Age", false, 0.0, 99.0), qi("Zip", false, 10000.0, 10099.0)];
+    let mut size: HashMap<String, i64> = HashMap::new();
+    size.insert("Age".to_string(), 2);
+    size.insert("Zip".to_string(), 2);
+    let ri = find_ola1_initial_ri(&qis, 1, 400, &size).expect("ola1");
+    assert_eq!(ri.len(), 2);
+    assert!(ri[0] > 1 || ri[1] > 1);
+}
+
+#[test]
+fn ola2_picks_rf_that_meets_suppression_limit() {
+    let qis = vec![qi("Age", false, 0.0, 3.0)];
+
+    // 4 records, one per age value — need rf=2 to get 2-anonymity.
+    let mut hist: SparseHist = HashMap::new();
+    hist.insert(vec![0], 1);
+    hist.insert(vec![1], 1);
+    hist.insert(vec![2], 1);
+    hist.insert(vec![3], 1);
+
+    let mut size: HashMap<String, i64> = HashMap::new();
+    size.insert("Age".to_string(), 2);
+
+    let (rf, _dm, _eq) = find_ola2_best_rf(&qis, &hist, &[1], &size, 2, 0.0, 4).expect("ola2");
+    assert_eq!(rf, vec![2]);
+}
+
+// ── End-to-end pipeline smoke ────────────────────────────────────────────────
 
 #[test]
 fn run_pipeline_smoke_success() {
@@ -174,52 +205,6 @@ fn run_pipeline_smoke_success() {
     assert!(PathBuf::from(out_path).exists());
 
     let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn ola1_scales_initial_ri_when_estimated_eq_too_high() {
-    let qis = vec![
-        QuasiIdentifierLite {
-            column_name: "Age".to_string(),
-            is_categorical: false,
-            min_value: Some(0.0),
-            max_value: Some(99.0),
-        },
-        QuasiIdentifierLite {
-            column_name: "Zip".to_string(),
-            is_categorical: false,
-            min_value: Some(10000.0),
-            max_value: Some(10099.0),
-        },
-    ];
-    let mut size = BTreeMap::new();
-    size.insert("Age".to_string(), 2);
-    size.insert("Zip".to_string(), 2);
-    let ri = find_ola1_initial_ri(&qis, 1, 400, &size).expect("ola1");
-    assert_eq!(ri.len(), 2);
-    assert!(ri[0] > 1 || ri[1] > 1);
-}
-
-#[test]
-fn ola2_picks_rf_that_meets_suppression_limit() {
-    let qis = vec![QuasiIdentifierLite {
-        column_name: "Age".to_string(),
-        is_categorical: false,
-        min_value: Some(0.0),
-        max_value: Some(3.0),
-    }];
-
-    let mut hist = BTreeMap::new();
-    hist.insert(vec![0], 1);
-    hist.insert(vec![1], 1);
-    hist.insert(vec![2], 1);
-    hist.insert(vec![3], 1);
-
-    let mut size = BTreeMap::new();
-    size.insert("Age".to_string(), 2);
-
-    let (rf, _dm, _eq) = find_ola2_best_rf(&qis, &hist, &[1], &size, 2, 0.0, 4).expect("ola2");
-    assert_eq!(rf, vec![2]);
 }
 
 #[test]

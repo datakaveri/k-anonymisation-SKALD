@@ -42,3 +42,4 @@ legacy_archive/
 data/*.enc
 data/secret.key
 data/*.py
+docs/

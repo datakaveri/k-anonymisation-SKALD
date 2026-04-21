@@ -1,51 +1,63 @@
-use crate::pipeline::bootstrap::{split_csv_line_basic, validation, PipelineError, RuntimeConfig};
-use serde::Serialize;
+//! OLA (Optimal Lattice Anonymization) algorithm — phases 1 and 2.
+//!
+//! # OLA-1
+//! Performs a fast **synthetic** search over a generalization tree built from
+//! QI descriptors alone (no data read). Finds the minimal node that keeps the
+//! number of equivalence classes below a configurable RAM limit (`max_eq`).
+//! The result becomes `initial_ri` — the base generalization used to bin the
+//! real data into the sparse histogram for OLA-2.
+//!
+//! # OLA-2
+//! Given the real [`SparseHist`] histogram, runs a **binary lattice search**:
+//! each iteration evaluates the middle unmarked node at the median unmarked
+//! level, then uses monotonicity to mark entire subtrees (pass → all
+//! descendants pass) and ancestor chains (fail → all ancestors fail).
+//! Returns the node with minimum DM* that satisfies k-anonymity plus the
+//! optional suppression fraction limit.
+//!
+//! Helper functions for merging the histogram, scoring nodes, and propagating
+//! pass/fail status through the tree are also defined here.
+
+use crate::pipeline::bootstrap::{split_csv_line_basic, validation, PipelineError};
+use super::{QuasiIdentifierLite, SparseHist, Ola2NodeScore, Ola2SearchResult, base_col_name};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::io::{BufRead, BufReader};
+use std::path::PathBuf;
 
-#[derive(Debug, Clone)]
-pub struct QuasiIdentifierLite {
-    pub column_name: String,
-    pub is_categorical: bool,
-    pub min_value: Option<f64>,
-    pub max_value: Option<f64>,
-}
+// ── Arithmetic helpers ────────────────────────────────────────────────────────
 
-impl QuasiIdentifierLite {
-    fn get_range(&self) -> f64 {
-        match (self.min_value, self.max_value) {
-            (Some(a), Some(b)) => (b - a + 1.0).max(1.0),
-            _ => 1.0,
-        }
-    }
-}
-
-pub type SparseHist = BTreeMap<Vec<i64>, i64>;
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Ola2NodeScore {
-    pub node: Vec<i64>,
-    pub dm_star: i64,
-    pub num_equivalence_classes: i64,
-    pub suppression_count: i64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct Ola2SearchResult {
-    pub best_rf: Vec<i64>,
-    pub lowest_dm_star: i64,
-    pub num_equivalence_classes: i64,
-    pub top_nodes: Vec<Ola2NodeScore>,
-}
-
+/// Integer ceiling division for non-negative numerator and positive denominator.
+///
+/// Negative or zero inputs are clamped: `a` → `max(a,0)`, `b` → `max(b,1)`.
+///
+/// # Arguments
+/// * `a` — numerator.
+/// * `b` — denominator.
+///
+/// # Returns
+/// `⌈a / b⌉` as `i64`.
 fn ceil_div_i64(a: i64, b: i64) -> i64 {
     let aa = a.max(0);
     let bb = b.max(1);
     (aa + bb - 1) / bb
 }
 
+// ── Categorical level bounds ──────────────────────────────────────────────────
+
+/// Returns the maximum generalization level for a categorical QI column in OLA-1.
+///
+/// OLA-1 uses a fixed hierarchy depth per supported category so that the
+/// synthetic equivalence-class count stays predictable.
+///
+/// Supported columns and their depths:
+/// - `"blood group"` → 3 (exact / ABO / `*`)
+/// - `"gender"` → 2 (exact / `*`)
+/// - `"profession"` → 4 (exact / sector / super-sector / `*`)
+///
+/// # Errors
+/// Returns [`PipelineError`] with code `GENERALIZATION_FAILED` for any
+/// unsupported categorical column name.
 fn max_categorical_level_ola1(col: &str) -> Result<i64, PipelineError> {
     match col.trim().to_lowercase().as_str() {
         "blood group" => Ok(3),
@@ -59,6 +71,13 @@ fn max_categorical_level_ola1(col: &str) -> Result<i64, PipelineError> {
     }
 }
 
+/// Returns the maximum generalization level for a categorical QI column in OLA-2.
+///
+/// Unlike [`max_categorical_level_ola1`], OLA-2 defaults to level 4 for
+/// unknown columns so that the lattice is always finite.
+///
+/// # Arguments
+/// * `col` — column name (case-insensitive).
 fn max_categorical_level_ola2(col: &str) -> i64 {
     match col.trim().to_lowercase().as_str() {
         "blood group" => 3,
@@ -67,6 +86,26 @@ fn max_categorical_level_ola2(col: &str) -> i64 {
     }
 }
 
+// ── OLA-1 equivalence-class estimator ────────────────────────────────────────
+
+/// Estimates the number of equivalence classes produced by a given OLA-1 node.
+///
+/// The estimate is a product over all QIs:
+/// - **Categorical**: `⌊max_level / bin_width⌋` distinct categories.
+/// - **Numerical**: `⌈range / bin_width⌉` buckets.
+///
+/// The product is computed with saturation to avoid integer overflow.
+///
+/// # Arguments
+/// * `qis` — quasi-identifier descriptors (length must equal `bin_widths`).
+/// * `bin_widths` — generalization factors for each QI at the candidate node.
+///
+/// # Returns
+/// Estimated equivalence class count (≥ 1).
+///
+/// # Errors
+/// Returns [`PipelineError`] if lengths differ or a categorical column is
+/// unsupported by OLA-1.
 fn calculate_equivalence_classes_ola1(
     qis: &[QuasiIdentifierLite],
     bin_widths: &[i64],
@@ -88,6 +127,26 @@ fn calculate_equivalence_classes_ola1(
     Ok(classes.max(1))
 }
 
+// ── Lattice tree builder ──────────────────────────────────────────────────────
+
+/// Builds all levels of the generalization lattice as a list of node vectors.
+///
+/// Starting from `initial`, each level is obtained by "climbing" each QI by
+/// one step (categorical: increment level, numerical: multiply bin width by
+/// `size_factors[base_col]`). Duplicate nodes are deduplicated via a `BTreeSet`.
+/// The loop terminates when no new nodes are reachable.
+///
+/// # Arguments
+/// * `qis` — quasi-identifier descriptors.
+/// * `initial` — starting node (one factor per QI, length must equal `qis`).
+/// * `size_factors` — multiplication factors keyed by base column name.
+/// * `ola1_mode` — `true` to use OLA-1 categorical level bounds; `false` for OLA-2.
+///
+/// # Returns
+/// `tree[level_index]` is the list of all distinct nodes reachable at that level.
+///
+/// # Errors
+/// Returns [`PipelineError`] on length mismatch or missing size factor.
 fn build_tree_levels(
     qis: &[QuasiIdentifierLite],
     initial: &[i64],
@@ -142,100 +201,29 @@ fn build_tree_levels(
     Ok(tree)
 }
 
-pub fn base_col_name(col: &str) -> String {
-    if let Some(v) = col.strip_suffix("_scaled_encoded") {
-        v.to_string()
-    } else if let Some(v) = col.strip_suffix("_encoded") {
-        v.to_string()
-    } else if let Some(v) = col.strip_suffix("_scaled") {
-        v.to_string()
-    } else {
-        col.to_string()
-    }
-}
+// ── OLA-1 public interface ────────────────────────────────────────────────────
 
-pub fn compute_numerical_min_max(
-    chunk_paths: &[PathBuf],
-    numerical_columns: &[String],
-) -> Result<BTreeMap<String, (f64, f64)>, PipelineError> {
-    // (min, max) accumulators — one entry per column, updated in a single pass per chunk
-    let mut acc: BTreeMap<String, (Option<f64>, Option<f64>)> =
-        numerical_columns.iter().map(|c| (c.clone(), (None, None))).collect();
-
-    for chunk_path in chunk_paths {
-        let f = fs::File::open(chunk_path)?;
-        let r = BufReader::new(f);
-        let mut lines = r.lines();
-        let header = lines
-            .next()
-            .ok_or_else(|| validation("ENCODING_FAILED", "Chunk missing header", &chunk_path.display().to_string()))?
-            .map_err(|e| validation("ENCODING_FAILED", "Failed reading header", &e.to_string()))?;
-        let headers = split_csv_line_basic(&header);
-
-        // Resolve column indices once per chunk (same schema across all chunks)
-        let col_indices: Vec<Option<usize>> = numerical_columns
-            .iter()
-            .map(|col| headers.iter().position(|h| h == col))
-            .collect();
-
-        for line in lines {
-            let line = line.map_err(|e| validation("GENERALIZATION_FAILED", "Failed reading row", &e.to_string()))?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let fields = split_csv_line_basic(&line);
-            for (col_name, col_idx_opt) in numerical_columns.iter().zip(col_indices.iter()) {
-                let Some(col_idx) = col_idx_opt else { continue };
-                if *col_idx >= fields.len() {
-                    continue;
-                }
-                if let Ok(v) = fields[*col_idx].trim().parse::<f64>() {
-                    let entry = acc.get_mut(col_name).unwrap();
-                    entry.0 = Some(entry.0.map_or(v, |m: f64| m.min(v)));
-                    entry.1 = Some(entry.1.map_or(v, |m: f64| m.max(v)));
-                }
-            }
-        }
-    }
-
-    Ok(acc
-        .into_iter()
-        .map(|(k, (mn, mx))| (k, (mn.unwrap_or(0.0), mx.unwrap_or(0.0))))
-        .collect())
-}
-
-pub fn build_quasi_identifiers(
-    cfg: &RuntimeConfig,
-    dynamic_min_max: &BTreeMap<String, (f64, f64)>,
-) -> Result<Vec<QuasiIdentifierLite>, PipelineError> {
-    let mut out = Vec::new();
-
-    for qi in &cfg.numerical_qis {
-        let (mn, mx) = dynamic_min_max.get(&qi.column).copied().unwrap_or((0.0, 0.0));
-        out.push(QuasiIdentifierLite {
-            column_name: qi.column.clone(),
-            is_categorical: false,
-            min_value: Some(mn),
-            max_value: Some(mx),
-        });
-    }
-
-    for c in &cfg.categorical_qis {
-        out.push(QuasiIdentifierLite {
-            column_name: c.clone(),
-            is_categorical: true,
-            min_value: None,
-            max_value: None,
-        });
-    }
-
-    if out.is_empty() {
-        return Err(validation("CONFIG_INVALID", "No quasi-identifiers defined", "quasi_identifiers"));
-    }
-
-    Ok(out)
-}
-
+/// Finds the minimal OLA-1 generalization node that satisfies the memory-based
+/// equivalence-class constraint.
+///
+/// Builds the full synthetic lattice tree, evaluates each node independently
+/// (no data required — only QI descriptors), and returns the lexicographically
+/// smallest passing node.
+///
+/// # Arguments
+/// * `qis` — quasi-identifier descriptors (non-empty).
+/// * `_n_chunks` — unused; reserved for future adaptive sizing.
+/// * `max_eq` — upper bound on the number of equivalence classes (must be > 0).
+/// * `size_factors` — multiplication factors keyed by base column name.
+///
+/// # Returns
+/// A node vector (one bin-width per QI) representing `initial_ri`.
+///
+/// # Errors
+/// - `ANON_NO_QIS` — `qis` is empty.
+/// - `GENERALIZATION_FAILED` — `max_eq ≤ 0`.
+/// - `ANON_INFEASIBLE` — no node satisfies the constraint (try increasing RAM
+///   budget, reducing size factors, or reducing the number of QIs).
 pub fn find_ola1_initial_ri(
     qis: &[QuasiIdentifierLite],
     _n_chunks: i64,
@@ -281,6 +269,30 @@ pub fn find_ola1_initial_ri(
     })
 }
 
+// ── Histogram builder ─────────────────────────────────────────────────────────
+
+/// Builds the sparse histogram from all chunk CSV files at the `initial_ri` granularity.
+///
+/// **Two-pass algorithm:**
+/// 1. Scan all chunks to collect the complete categorical domain for each
+///    categorical QI (so that domain indices are consistent even when a value
+///    appears only in a subset of chunks).
+/// 2. Re-scan all chunks, bin each record into a QI index-tuple, and increment
+///    the histogram counter.
+///
+/// # Arguments
+/// * `chunk_paths` — paths to the pre-processed chunk CSV files (non-empty).
+/// * `qis` — quasi-identifier descriptors (length must equal `initial_ri`).
+/// * `initial_ri` — OLA-1 bin widths used to bucket numerical values.
+///
+/// # Returns
+/// `(histogram, total_valid_records)`.
+///
+/// # Errors
+/// - `GENERALIZATION_FAILED` — length mismatch, unreadable file, missing QI
+///   column, or no valid histogram records produced.
+/// - `DATA_COLUMN_MISSING` — a QI column (or its base name) is absent from the
+///   CSV header.
 pub fn build_sparse_histogram(
     chunk_paths: &[PathBuf],
     qis: &[QuasiIdentifierLite],
@@ -396,6 +408,16 @@ pub fn build_sparse_histogram(
     Ok((hist, total_records))
 }
 
+// ── Histogram merging and scoring ─────────────────────────────────────────────
+
+/// Merges a fine-grained sparse histogram to the coarser granularity of `node`.
+///
+/// Each key `k` is mapped to `k[i] / node[i]` (integer division), and counts
+/// from keys that map to the same coarse key are summed.
+///
+/// # Arguments
+/// * `hist` — fine-grained histogram (built at `initial_ri` resolution).
+/// * `node` — coarser bin widths (one per QI, ≥ 1).
 fn merge_sparse_equivalence(hist: &SparseHist, node: &[i64]) -> SparseHist {
     let mut merged: SparseHist = BTreeMap::new();
     for (idx, count) in hist {
@@ -408,10 +430,23 @@ fn merge_sparse_equivalence(hist: &SparseHist, node: &[i64]) -> SparseHist {
     merged
 }
 
+/// Counts the total number of records in equivalence classes smaller than `k`
+/// (i.e., records that would be suppressed at this node).
+///
+/// # Arguments
+/// * `hist` — merged histogram at node granularity.
+/// * `k` — the k-anonymity threshold.
 fn suppression_count_sparse(hist: &SparseHist, k: i64) -> i64 {
     hist.values().filter(|&&v| v > 0 && v < k).sum()
 }
 
+/// Computes the DM* (Discernibility Metric) and equivalence class count for a
+/// merged histogram.
+///
+/// Only equivalence classes with count ≥ k contribute to DM*; smaller classes
+/// are excluded (they will be suppressed).
+///
+/// Returns `(dm_star, num_equivalence_classes)`.
 fn compute_dm_star_sparse(hist: &SparseHist, k: i64) -> (i64, i64) {
     let mut dm = 0_i64;
     let mut eq = 0_i64;
@@ -423,6 +458,8 @@ fn compute_dm_star_sparse(hist: &SparseHist, k: i64) -> (i64, i64) {
     }
     (dm, eq)
 }
+
+// ── Lattice pass/fail propagation ─────────────────────────────────────────────
 
 /// Mark every unmarked descendant of `node` (all dims ≥ node) as passing.
 /// Only levels ≥ `node_level` are scanned — descendants cannot live at lower levels.
@@ -465,6 +502,18 @@ fn mark_parents_fail(
     }
 }
 
+// ── Node scoring ──────────────────────────────────────────────────────────────
+
+/// Evaluates and ranks up to 5 of the best passing nodes by `(dm_star,
+/// suppression_count, -num_equivalence_classes, node)` ascending.
+///
+/// # Arguments
+/// * `base_hist` — fine-grained histogram at `initial_ri` resolution.
+/// * `pass_nodes` — all nodes that passed the k-anonymity + suppression check.
+/// * `k` — k-anonymity threshold.
+///
+/// # Returns
+/// At most 5 [`Ola2NodeScore`] entries sorted from best to worst.
 fn compute_top_ola2_nodes(
     base_hist: &SparseHist,
     pass_nodes: &[Vec<i64>],
@@ -493,6 +542,16 @@ fn compute_top_ola2_nodes(
     out.into_iter().take(5).collect()
 }
 
+// ── OLA-2 public interface ────────────────────────────────────────────────────
+
+/// Convenience wrapper around [`find_ola2_best_rf_detailed`] that returns only
+/// the winning generalization factors and summary scores.
+///
+/// # Returns
+/// `(best_rf, lowest_dm_star, num_equivalence_classes)`
+///
+/// # Errors
+/// Propagates all errors from [`find_ola2_best_rf_detailed`].
 pub fn find_ola2_best_rf(
     qis: &[QuasiIdentifierLite],
     base_hist: &SparseHist,
@@ -518,6 +577,34 @@ pub fn find_ola2_best_rf(
     ))
 }
 
+/// Runs the full OLA-2 binary lattice search and returns detailed results.
+///
+/// The algorithm:
+/// 1. Build the generalization lattice from `initial_ri`.
+/// 2. Maintain a `node_status` map (unmarked / pass / fail).
+/// 3. Repeat until all nodes are marked:
+///    a. Pick the median unmarked level, then the median unmarked node on it.
+///    b. Merge the histogram to that node's granularity and count suppressed records.
+///    c. If the suppression fraction is within `suppression_limit`, mark the node
+///       **pass** and propagate pass to all descendants.
+///    d. Otherwise mark it **fail** and propagate fail to all ancestors.
+/// 4. Score all passing nodes with DM* and return the top-5.
+///
+/// # Arguments
+/// * `qis` — quasi-identifier descriptors.
+/// * `base_hist` — sparse histogram at `initial_ri` granularity.
+/// * `initial_ri` — starting node from OLA-1.
+/// * `size_factors` — multiplication factors keyed by base column name.
+/// * `k` — k-anonymity threshold (must be > 0).
+/// * `suppression_limit` — maximum fraction of records that may be suppressed (`[0.0, 1.0]`).
+/// * `total_records` — total valid records in `base_hist` (must be > 0).
+///
+/// # Returns
+/// An [`Ola2SearchResult`] containing `best_rf`, `lowest_dm_star`,
+/// `num_equivalence_classes`, and the top-5 `top_nodes`.
+///
+/// # Errors
+/// - `GENERALIZATION_FAILED` — invalid inputs or no feasible node found.
 pub fn find_ola2_best_rf_detailed(
     qis: &[QuasiIdentifierLite],
     base_hist: &SparseHist,
@@ -619,6 +706,21 @@ pub fn find_ola2_best_rf_detailed(
     })
 }
 
+// ── Post-processing statistics ────────────────────────────────────────────────
+
+/// Computes a frequency distribution of equivalence-class sizes at the chosen
+/// generalization node.
+///
+/// Only classes with count ≥ k are included (suppressed classes are excluded).
+/// The returned map can be serialized to JSON for audit logs.
+///
+/// # Arguments
+/// * `hist` — fine-grained histogram at `initial_ri` resolution.
+/// * `rf` — chosen generalization factors (the `best_rf` from OLA-2).
+/// * `k` — k-anonymity threshold.
+///
+/// # Returns
+/// Map from equivalence-class size to the number of classes with that size.
 pub fn equivalence_class_stats(hist: &SparseHist, rf: &[i64], k: i64) -> BTreeMap<i64, i64> {
     let merged = merge_sparse_equivalence(hist, rf);
     let mut stats = BTreeMap::new();
@@ -628,262 +730,4 @@ pub fn equivalence_class_stats(hist: &SparseHist, rf: &[i64], k: i64) -> BTreeMa
         }
     }
     stats
-}
-
-fn generalize_numeric_label(value: i64, min_val: i64, step: i64) -> String {
-    let bucket_start = min_val + ((value - min_val) / step.max(1)) * step.max(1);
-    let bucket_end = bucket_start + step.max(1) - 1;
-    format!("[{}-{}]", bucket_start, bucket_end)
-}
-
-fn generalize_categorical_value(column_name: &str, value: &str, level: i64) -> String {
-    let key = column_name.trim().to_lowercase();
-    let lvl = level.max(1);
-    match key.as_str() {
-        "blood group" => {
-            if lvl <= 1 {
-                value.to_string()
-            } else if lvl == 2 {
-                match value {
-                    "A+" | "A-" => "A".to_string(),
-                    "B+" | "B-" => "B".to_string(),
-                    "AB+" | "AB-" => "AB".to_string(),
-                    "O+" | "O-" => "O".to_string(),
-                    _ => "Other".to_string(),
-                }
-            } else {
-                "*".to_string()
-            }
-        }
-        "gender" => {
-            if lvl <= 1 {
-                value.to_string()
-            } else {
-                "*".to_string()
-            }
-        }
-        "profession" => {
-            if lvl <= 1 {
-                value.to_string()
-            } else if lvl == 2 {
-                match value {
-                    "Medical Specialists" | "Allied Health" | "Nursing" | "Healthcare Support" => "Healthcare".to_string(),
-                    "K-12 Education Teacher" | "Higher Education Teacher" | "Supplemental Education Teacher" | "University Professor" => "Education".to_string(),
-                    "Performing Arts" | "Visual & Media Arts" | "Design" | "Mixed Media Artist" => "Creative".to_string(),
-                    "Traditional Engineering" | "Software Engineering" | "Data & Analytics" | "AI & Machine Learning" => "Engineering".to_string(),
-                    _ => "Other".to_string(),
-                }
-            } else if lvl == 3 {
-                match value {
-                    "Medical Specialists"
-                    | "Allied Health"
-                    | "Nursing"
-                    | "Healthcare Support"
-                    | "K-12 Education Teacher"
-                    | "Higher Education Teacher"
-                    | "Supplemental Education Teacher"
-                    | "University Professor" => "Service Sector".to_string(),
-                    "Performing Arts"
-                    | "Visual & Media Arts"
-                    | "Design"
-                    | "Mixed Media Artist"
-                    | "Traditional Engineering"
-                    | "Software Engineering"
-                    | "Data & Analytics"
-                    | "AI & Machine Learning" => "Non-Service".to_string(),
-                    _ => "Other".to_string(),
-                }
-            } else {
-                "*".to_string()
-            }
-        }
-        _ => value.to_string(),
-    }
-}
-
-fn generalized_chunk_name(output_path: &str, idx: usize) -> String {
-    let base = output_path.trim_end_matches(".csv");
-    format!("{base}_chunk{idx}.csv")
-}
-
-pub fn generalize_and_write_outputs(
-    chunk_paths: &[PathBuf],
-    qis: &[QuasiIdentifierLite],
-    final_rf: &[i64],
-    k: i64,
-    output_dir: &Path,
-    output_path: &str,
-) -> Result<(), PipelineError> {
-    if final_rf.len() != qis.len() {
-        return Err(validation("GENERALIZATION_FAILED", "final_rf length mismatch", "generalization"));
-    }
-    fs::create_dir_all(output_dir)?;
-
-    // Resolve column layout from first chunk header (uniform schema across all chunks)
-    let (headers, qi_src_indices, qi_output_idx) = {
-        let first = chunk_paths
-            .first()
-            .ok_or_else(|| validation("GENERALIZATION_FAILED", "no chunks provided", "generalization"))?;
-        let f = fs::File::open(first)?;
-        let mut lines = BufReader::new(f).lines();
-        let header = lines
-            .next()
-            .ok_or_else(|| validation("GENERALIZATION_FAILED", "chunk missing header", &first.display().to_string()))?
-            .map_err(|e| validation("GENERALIZATION_FAILED", "failed reading header", &e.to_string()))?;
-        let headers = split_csv_line_basic(&header);
-
-        // Source column index for each QI (may differ from output index for numerical)
-        let qi_src: Vec<Option<usize>> = qis
-            .iter()
-            .map(|qi| {
-                if qi.is_categorical {
-                    headers.iter().position(|h| h == &qi.column_name)
-                } else {
-                    let src = base_col_name(&qi.column_name);
-                    headers.iter().position(|h| h == &src)
-                }
-            })
-            .collect();
-
-        // Output QI column indices (used for EC suppression key)
-        let qi_out: Vec<usize> = qis
-            .iter()
-            .filter_map(|qi| {
-                let col = if qi.is_categorical { qi.column_name.clone() } else { base_col_name(&qi.column_name) };
-                headers.iter().position(|h| h == &col)
-            })
-            .collect();
-
-        (headers, qi_src, qi_out)
-    };
-
-    // Use global min from qi.min_value (computed across all chunks by compute_numerical_min_max)
-    let global_mins: Vec<i64> = qis.iter().map(|qi| qi.min_value.unwrap_or(0.0).floor() as i64).collect();
-
-    let mut output_chunk_paths = Vec::new();
-
-    for (chunk_idx, chunk) in chunk_paths.iter().enumerate() {
-        // --- Pass 1: generalize each row, write to temp file, accumulate EC counts ---
-        let tmp_path = output_dir.join(format!("_gen_tmp_{chunk_idx}.csv"));
-        let mut class_counts: BTreeMap<Vec<String>, i64> = BTreeMap::new();
-
-        {
-            let f = fs::File::open(chunk)?;
-            let mut lines = BufReader::new(f).lines();
-            let _ = lines.next(); // skip header
-
-            let mut w = BufWriter::new(fs::File::create(&tmp_path)?);
-            w.write_all(headers.join(",").as_bytes())?;
-            w.write_all(b"\n")?;
-
-            for line in lines {
-                let line = line.map_err(|e| {
-                    validation("GENERALIZATION_FAILED", "failed reading chunk row", &e.to_string())
-                })?;
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let mut fields = split_csv_line_basic(&line);
-
-                // Apply generalization in-place
-                for ((qi, bw), src_idx_opt) in qis.iter().zip(final_rf.iter()).zip(qi_src_indices.iter()) {
-                    let Some(src_idx) = src_idx_opt else { continue };
-                    if *src_idx >= fields.len() {
-                        continue;
-                    }
-                    if qi.is_categorical {
-                        let v = fields[*src_idx].clone();
-                        fields[*src_idx] = generalize_categorical_value(&qi.column_name, &v, *bw);
-                    } else {
-                        if let Ok(v) = fields[*src_idx].trim().parse::<f64>() {
-                            let qi_pos = qis.iter().position(|q| std::ptr::eq(q, qi)).unwrap_or(0);
-                            fields[*src_idx] =
-                                generalize_numeric_label(v.round() as i64, global_mins[qi_pos], (*bw).max(1));
-                        }
-                    }
-                }
-
-                // Accumulate EC key (generalized QI values only)
-                if !qi_output_idx.is_empty() && k > 1 {
-                    let key: Vec<String> =
-                        qi_output_idx.iter().map(|&i| fields.get(i).cloned().unwrap_or_default()).collect();
-                    *class_counts.entry(key).or_insert(0) += 1;
-                }
-
-                w.write_all(fields.join(",").as_bytes())?;
-                w.write_all(b"\n")?;
-            }
-            w.flush()?;
-        }
-
-        // --- Pass 2: apply suppression using EC counts, write final chunk output ---
-        let out_name = generalized_chunk_name(output_path, chunk_idx + 1);
-        let out_path = output_dir.join(out_name);
-        {
-            let f = fs::File::open(&tmp_path)?;
-            let mut lines = BufReader::new(f).lines();
-            let _ = lines.next(); // skip header written by pass 1
-
-            let mut w = BufWriter::new(fs::File::create(&out_path)?);
-            w.write_all(headers.join(",").as_bytes())?;
-            w.write_all(b"\n")?;
-
-            for line in lines {
-                let line = line.map_err(|e| {
-                    validation("GENERALIZATION_FAILED", "failed reading temp chunk", &e.to_string())
-                })?;
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let mut fields = split_csv_line_basic(&line);
-
-                if !qi_output_idx.is_empty() && k > 1 {
-                    let key: Vec<String> =
-                        qi_output_idx.iter().map(|&i| fields.get(i).cloned().unwrap_or_default()).collect();
-                    if class_counts.get(&key).copied().unwrap_or(0) < k {
-                        for &i in &qi_output_idx {
-                            if i < fields.len() {
-                                fields[i] = "*".to_string();
-                            }
-                        }
-                    }
-                }
-
-                w.write_all(fields.join(",").as_bytes())?;
-                w.write_all(b"\n")?;
-            }
-            w.flush()?;
-        }
-
-        let _ = fs::remove_file(&tmp_path);
-        output_chunk_paths.push(out_path);
-    }
-
-    // Merge chunk outputs into single final file
-    let final_path = if Path::new(output_path).is_absolute() {
-        PathBuf::from(output_path)
-    } else {
-        output_dir.join(output_path)
-    };
-    let mut final_writer = BufWriter::new(fs::File::create(&final_path)?);
-    for (i, p) in output_chunk_paths.iter().enumerate() {
-        let f = fs::File::open(p)?;
-        let r = BufReader::new(f);
-        for (line_no, line) in r.lines().enumerate() {
-            let line = line.map_err(|e| {
-                validation("GENERALIZATION_FAILED", "failed reading generalized chunk", &e.to_string())
-            })?;
-            if i > 0 && line_no == 0 {
-                continue; // skip repeated header
-            }
-            final_writer.write_all(line.as_bytes())?;
-            final_writer.write_all(b"\n")?;
-        }
-    }
-    final_writer.flush()?;
-    for p in output_chunk_paths {
-        let _ = fs::remove_file(p);
-    }
-
-    Ok(())
 }

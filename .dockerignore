@@ -1,0 +1,55 @@
+# ── Rust build artifacts (largest directory — must exclude from build context) ─
+SKALD/target/
+SKALD/debug/
+
+# ── Python artifacts ───────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+coverage.txt
+venv/
+vemv/
+*.egg-info/
+SKALD.egg-info/
+chunkanon.egg-info/
+
+# ── Runtime directories (mounted as volumes at runtime, not baked into image) ──
+data/
+output/
+chunks/
+encodings/
+keys/
+output_chunks/
+pipelineOutput/
+
+# ── Development / scratch ──────────────────────────────────────────────────────
+legacy_archive/
+benchmark/
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+temp/
+SKALD/temp/
+*.tmp
+
+# ── Secrets / env ─────────────────────────────────────────────────────────────
+.env
+SKALD/.env
+data/*.enc
+data/secret.key
+
+# ── Logs and generated outputs ────────────────────────────────────────────────
+*.log
+SKALD/output/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.zip
+docs/
+notebooks/
+tests/
+scripts/

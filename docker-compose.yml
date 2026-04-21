@@ -1,14 +1,35 @@
 version: "3.8"
 
+# SKALD — Rust anonymization pipeline
+#
+# Usage:
+#   docker compose up --build      # build image and run pipeline once
+#   docker compose up              # run with previously built image
+#
+# Place your input CSV in ./data/ and config JSON in ./config/ before running.
+# Results are written to ./output/ on the host.
+
 services:
-  skald_server:
-    build: .
-    container_name: skald_server_container
-    ports:
-      - "8071:8071"
-    environment:
-      - FLASK_ENV=development
+  skald:
+    image: ghcr.io/kailash-reddy/skald:skald_v3
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: skald_pipeline
+    # Pipeline is a one-shot batch process — no auto-restart
+    restart: "no"
     volumes:
-      - .:/app
-    working_dir: /app
-    command: ["python", "SKALD_server.py", "run", "--host=0.0.0.0", "--port=8071"]
+      # Config JSON read by pipeline  (host → container, read-only)
+      - ./config:/app/config:ro
+      # Input CSV(s)                  (host → container, read-only)
+      - ./data:/app/data:ro
+      # Pipeline outputs              (container → host, read-write)
+      - ./output:/app/output
+      # Scratch space for CSV chunks  (ephemeral, not exposed to host)
+      - skald_chunks:/app/chunks
+    # Exit code mirrors pipeline status: 0 = success, 1 = error
+    # Check ./output/status.json for structured result and ./output/pipeline.log for trace.
+
+volumes:
+  # Named volume for intermediate chunk files — discarded when container is removed
+  skald_chunks:

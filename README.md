@@ -1,171 +1,243 @@
 # SKALD
 
-SKALD is a scalable, chunk-wise k‑anonymization pipeline based on the OLA (Optimal Lattice Anonymization) approach. It is designed for large CSVs, with streaming preprocessing and sparse histograms to keep memory stable on smaller machines.
+Streaming k-anonymization pipeline built in Rust.
+Implements the OLA-1 / OLA-2 lattice algorithms for optimal generalization with minimal information loss.
 
-## Highlights
+---
 
-- Chunk-based processing for large CSVs
-- Numeric + categorical quasi-identifiers (QI)
-- Streaming preprocessing (suppress, hash, mask, encrypt, charcloak, tokenize, FPE)
-- Numerical encoding for sparse attributes
-- Sparse histogram storage (only non‑zero equivalence classes)
-- OLA‑1 for initial bin widths; OLA‑2 for final RF selection
-- Detailed logging and machine‑readable status output
+## What it does
 
-## What SKALD Does (Brief)
+1. Reads one CSV from `data/`
+2. Applies preprocessing (suppress, hash, mask, encrypt, tokenize, FPE)
+3. Computes k-anonymous generalizations using OLA-2 lattice search
+4. Writes anonymized output and a structured status payload to `output/`
 
-At a high level, SKALD takes a CSV, applies configurable privacy transformations (suppression, hashing, masking, encryption), then computes k‑anonymity generalization using OLA. It operates on chunks so large files can be processed without loading the full dataset into memory.
+---
 
-## Requirements
-
-- Python 3.8+
-- Dependencies in `requirements.txt`
-
-## Quick Start
-
-1. Put **one CSV** in `k-anonymisation-SKALD/data/`.
-2. Put **one JSON config** in `k-anonymisation-SKALD/config/`.
-3. Run:
+## Quick start — Docker (recommended)
 
 ```bash
-python3 -m SKALD.core
+# 1. Add your CSV
+cp your_dataset.csv data/
+
+# 2. Add your config (see Config Schema below)
+cp your_config.json config/config.json
+
+# 3. Build and run
+docker compose up --build
+
+# 4. Read results
+cat output/status.json
+cat output/pipeline.log        # full timestamped trace
 ```
 
-The pipeline reads the first JSON file in `config/`, builds a temporary YAML config internally, and runs the full pipeline.
+Exit code `0` = success, `1` = error. All detail is in `output/status.json`.
 
-## Configuration (JSON)
+---
 
-The entrypoint expects a JSON file with this structure:
+## Quick start — local Rust
 
-- `operations`: list of operations (e.g., `"SKALD"`, `"k-anonymity"`).
-- `data_type`: name of the dataset block to use.
-- `<data_type>`: the dataset‑specific settings.
+```bash
+# Prerequisites: Rust toolchain (https://rustup.rs)
 
-**Example**
+# Run pipeline
+cargo run --manifest-path SKALD/Cargo.toml --release --bin skald_pipeline
+
+# Run tests
+cargo test --manifest-path SKALD/Cargo.toml --lib
+```
+
+---
+
+## Config schema
+
+Place a single JSON file in `config/`. Full example:
 
 ```json
 {
   "operations": ["SKALD", "k-anonymity"],
-  "data_type": "BeneficiaryData",
-  "BeneficiaryData": {
-    "enable_k_anonymity": true,
-    "enable_l_diversity": false,
-    "output_path": "generalized.csv",
-    "output_directory": "output",
-    "log_file": "log.txt",
+  "data_type": "my_dataset",
+  "my_dataset": {
+    "output_path":        "anonymized.csv",
+    "output_directory":   "output",
+    "log_file":           "log.txt",
 
-    "suppress": ["FULLNAMEENGLISH"],
-    "hashing_with_salt": [],
+    "suppress":           ["name", "email"],
+    "hashing_with_salt":  ["national_id"],
     "hashing_without_salt": [],
-    "masking": [],
-    "encrypt": [],
+    "masking": [
+      { "column": "phone", "masking_char": "*", "characters_to_mask": [1,2,3] }
+    ],
+    "encrypt":            ["account_number"],
+    "charcloak":          [],
+    "tokenization": [
+      { "column": "patient_id", "prefix": "TK-", "digits": 8 }
+    ],
+    "fpe": [
+      { "column": "pan", "format": "pan" }
+    ],
 
     "quasi_identifiers": {
-      "categorical": [],
       "numerical": [
-        {"column": "AGE", "encode": false, "type": "int"},
-        {"column": "DISTRICTCODE", "encode": false, "type": "int"}
+        { "column": "age",     "encode": false, "type": "int" },
+        { "column": "zipcode", "encode": false, "type": "int" }
+      ],
+      "categorical": [
+        { "column": "gender" },
+        { "column": "blood_group" }
       ]
     },
-
-    "k_anonymize": {"k": 2},
-    "l_diversity": {"l": 1},
-    "sensitive_parameter": null,
-    "size": {"AGE": 2, "DISTRICTCODE": 2},
-    "suppression_limit": 0.01
+    "size": {
+      "age":     2,
+      "zipcode": 100
+    },
+    "k_anonymize":      { "k": 15 },
+    "suppression_limit": 0.05,
+    "enable_l_diversity": false
   }
 }
 ```
 
-**Notes**
+### Key fields
 
-- `size` contains multiplication factors (>1) used by OLA‑1/OLA‑2.
-- `suppression_limit` is a fraction from 0 to 1.
-- `enable_l_diversity` and `sensitive_parameter` are supported in config; k‑anonymity is enforced, l‑diversity hooks exist but are not strictly enforced in the current check path.
-
-## Outputs
-
-All outputs go to `output/` by default:
-
-- `output/status.json`: status + error details
-- `output/log.txt`: detailed logs and timings
-- `output/equivalence_class_stats.json`: equivalence class stats
-- `output/<output_path>`: final generalized CSV
-- `encodings/`: numerical encoding maps
-
-## How the Pipeline Works
-
-1. **Config load** from `config/*.json` → temporary YAML
-2. **Data validation** (`data/` must contain a single CSV)
-3. **Chunking** (approx. 1/4 of RAM per chunk)
-4. **Preprocessing** (suppress/hash/mask/encrypt/etc.)
-5. **Numerical encoding** for selected QIs
-6. **OLA‑1** to compute `initial_ri`
-7. **Histogram build** (streaming, sparse)
-8. **OLA‑2** to choose final RF
-9. **Generalization** and output merge
-
-## Preprocessing Steps (Detailed)
-
-Preprocessing happens per chunk before k‑anonymization. The steps are optional and driven by config:
-
-1. **Suppress**  
-   Drops specified columns entirely.
-
-2. **Hashing**  
-   - With salt: irreversible hashing with a per‑run salt.  
-   - Without salt: deterministic hashing (same input → same output).
-
-3. **Masking**  
-   Redacts patterns in string columns (e.g., phone/email), leaving only partial information.
-
-4. **Encryption**  
-   Symmetric encryption for sensitive fields, with keys written to `output/` (e.g., `symmetric_keys.json`).
-
-5. **Charcloak / Tokenization / FPE**  
-   Specialized transforms for preserving formats or generating tokens while hiding original values.
-
-Each transformation is applied in the order above. All transformations run chunk‑wise to keep memory bounded.
-
-## Performance and Memory
-
-- Histogram construction streams each chunk in batches and stores **only non‑zero bins**.
-- You can lower per‑batch memory by setting:
-
-```bash
-SKALD_CHUNK_PROCESSING_ROWS=50000 python3 -m SKALD.core
-```
-
-Lower values reduce memory at the cost of runtime.
-
-## Troubleshooting
-
-- **Process killed without error**: likely OS OOM kill. Reduce `SKALD_CHUNK_PROCESSING_ROWS` and/or use a smaller input CSV.
-- **Config validation errors**: check key names and required fields. The pipeline validates against `SKALD/config_validation.py`.
-- **Mixed dtype warnings**: ensure numeric QIs are clean. The pipeline coerces numeric values but will log non‑numeric rows.
-
-## Project Layout
-
-```
-k-anonymisation-SKALD/
-├── SKALD/
-│   ├── core.py
-│   ├── generalization_ri.py
-│   ├── generalization_rf.py
-│   ├── chunking.py
-│   ├── chunk_processing.py
-│   ├── preprocess.py
-│   └── ...
-├── config/
-├── data/
-├── output/
-├── encodings/
-└── README.md
-```
-
-## Development Notes
-
-- The default entrypoint is `python3 -m SKALD.core`.
-- `SKALD_main.py` provides an integration‑style entrypoint for external pipelines.
+| Field | Type | Description |
+|---|---|---|
+| `k_anonymize.k` | int ≥ 1 | Minimum group size for k-anonymity |
+| `suppression_limit` | float 0.0–1.0 | Max fraction of records allowed to be suppressed |
+| `size.<column>` | int | Bin width (generalization step) for each numerical QI |
+| `quasi_identifiers.numerical` | array | Numerical columns used as quasi-identifiers |
+| `quasi_identifiers.categorical` | array | Categorical columns used as quasi-identifiers |
 
 ---
+
+## Output files
+
+| File | Description |
+|---|---|
+| `output/status.json` | Structured result payload (see below) |
+| `output/pipeline.log` | Timestamped, phase-tagged execution trace |
+| `output/<output_path>` | Anonymized CSV (name set in config) |
+| `output/equivalence_class_stats.json` | EC size distribution |
+| `output/top_ola2_nodes.json` | Top-ranked generalization nodes from OLA-2 |
+| `output/token_vault.json` | Token↔value mapping (if tokenization used) |
+| `output/fpe_keys.json` | FPE encryption keys (if FPE used) |
+| `output/symmetric_keys.json` | Symmetric encryption keys (if encrypt used) |
+
+### `status.json` — success
+
+```json
+{
+  "status": "success",
+  "phase":  "done",
+  "outputs": {
+    "total_records":           50000,
+    "final_rf":                [2, 100],
+    "lowest_dm_star":          1234.5,
+    "num_equivalence_classes": 312,
+    "chunk_count":             4,
+    "final_output_path":       "output/anonymized.csv"
+  },
+  "log_file": "output/pipeline.log"
+}
+```
+
+### `status.json` — error
+
+```json
+{
+  "status": "error",
+  "error": {
+    "code":             "DATA_COLUMN_MISSING",
+    "message":          "A quasi-identifier column was not found in the CSV header",
+    "details":          "age",
+    "suggested_fix":    "Column names are case-sensitive — verify they match the config exactly.",
+    "http_status_code": 422
+  },
+  "log_file": "output/pipeline.log"
+}
+```
+
+---
+
+## Error codes
+
+| HTTP | Code | Meaning |
+|---|---|---|
+| 400 | `CONFIG_NOT_FOUND` | No JSON file in `config/` |
+| 400 | `CONFIG_PARSE_ERROR` | Config JSON is malformed |
+| 400 | `CONFIG_MISSING_FIELD` | Required field absent |
+| 400 | `CONFIG_INVALID_VALUE` | Field value out of range |
+| 422 | `DATA_DIR_MISSING` | `data/` directory not found |
+| 422 | `DATA_NO_CSV` | No CSV file in `data/` |
+| 422 | `DATA_EMPTY` | CSV is empty |
+| 422 | `DATA_COLUMN_MISSING` | QI column not in CSV header |
+| 422 | `PREPROCESS_COLUMN_MISSING` | Preprocessing target column not found |
+| 422 | `PREPROCESS_CONFIG_INVALID` | Malformed preprocessing entry |
+| 422 | `ANON_INFEASIBLE` | k-anonymity unsatisfiable — raise `suppression_limit` or lower `k` |
+| 422 | `ANON_NO_QIS` | No quasi-identifiers defined |
+| 500 | `IO_READ_FAILED` | File not found or unreadable |
+| 500 | `IO_WRITE_FAILED` | Disk full or output not writable |
+| 500 | `IO_PERMISSION_DENIED` | Permission denied |
+| 500 | `INTERNAL_ERROR` | Unexpected error — check `output/pipeline.log` |
+
+Full reference with suggested fixes: [`error_codes.txt`](error_codes.txt)
+
+---
+
+## Project layout
+
+```
+config/                    Runtime config JSON (volume-mounted)
+data/                      Input CSV (volume-mounted)
+output/                    Pipeline outputs (volume-mounted)
+SKALD/
+  Cargo.toml               Rust crate manifest
+  src/
+    bin/skald_pipeline.rs  Binary entry point
+    pipeline/
+      bootstrap.rs         Config parsing, Logger, error types, CSV utilities
+      pipeline.rs          Orchestrator — phase-tagged logging with elapsed time
+      anonymization.rs     OLA-1, OLA-2, histogram, generalization
+      preprocess.rs        Suppress, hash, mask, encrypt, tokenize, FPE
+      pyffx_compat.rs      Pure-Rust pyffx-compatible FPE (HMAC-SHA1 Feistel)
+      entry.rs             Error mapping → structured status.json
+benchmark/
+  generate_data.py         Streaming synthetic CSV generator (no RAM limit)
+  run_benchmark.sh         Automated benchmark matrix (Rust and Python)
+  compare_results.py       Side-by-side comparison report + speedup heatmap
+  run_overnight.sh         nohup launcher for overnight runs
+```
+
+---
+
+## Preprocessing operations
+
+| Operation | Config key | Description |
+|---|---|---|
+| Column suppression | `suppress` | Drops column entirely from output |
+| Salted hashing | `hashing_with_salt` | FNV-1a with per-column salt |
+| Unsalted hashing | `hashing_without_salt` | FNV-1a, deterministic |
+| Position masking | `masking` | Replaces specified character positions with mask char |
+| Pseudo-encryption | `encrypt` | HMAC-SHA256 keystream XOR, `ENC$`-prefixed hex |
+| Format-preserving encrypt | `encrypt` + `format_preserving: true` | Preserves character class layout |
+| Character cloaking | `charcloak` | Random character within same class (digit/upper/lower) |
+| Tokenization | `tokenization` | Stable `prefix + sequential ID`, vault persisted to `output/` |
+| FPE — PAN | `fpe` + `"format": "pan"` | pyffx-compatible Feistel on ABCDE1234F format |
+| FPE — digits | `fpe` + `"format": "digits"` | pyffx-compatible Feistel on digit strings |
+
+---
+
+## Benchmarking
+
+```bash
+# Rust branch
+bash benchmark/run_benchmark.sh --output benchmark/results_rust.json
+
+# Python (master) branch in VM
+bash benchmark/run_benchmark.sh --output benchmark/results_python.json
+
+# Compare
+python benchmark/compare_results.py \
+    benchmark/results_rust.json \
+    benchmark/results_python.json
+```
